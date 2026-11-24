@@ -1,41 +1,71 @@
-/* Hallmark · shape: app screen · genre: modern-minimal · theme: custom · posture: restrained · v2.0.0 */
-/* Hallmark · pre-emit critique: P5 H5 E5 S5 R4 V5 · weakest: R, cut sidebar rail for three destinations and removed nested card borders in favour of surface steps */
+/* Hallmark · shape: app screen · genre: atmospheric · theme: custom · posture: committed · surface: absolute · v2.0.0 */
+/* Hallmark · pre-emit critique: P5 H5 E5 S5 R5 V5 · weakest: R, cut light theme, bilingual toggle, and permanent slider tracks to keep four calm rows on one stage */
 
 :root {
-  color-scheme: light;
+  color-scheme: dark;
 
-  /* Typefaces */
-  --font-sans: "Segoe UI Variable Text", "Segoe UI", system-ui, -apple-system, sans-serif;
+  /* Typefaces (Neue Montreal neo-grotesk proportions via local Inter Variable) */
+  --font-sans: "Inter Variable", "Segoe UI Variable Display", "Segoe UI", system-ui, sans-serif;
   --font-mono: "Cascadia Mono", Consolas, ui-monospace, monospace;
 
-  /* Steel-tinted neutral ramp (Light: Anodized Silver) */
-  --color-paper: oklch(97.5% 0.006 250);
-  --color-paper-2: oklch(94.2% 0.008 250);
-  --color-paper-3: oklch(90.5% 0.01 250);
-  --color-ink: oklch(19% 0.012 250);
-  --color-ink-2: oklch(40% 0.012 250);
-  --color-muted: oklch(52% 0.01 250);
-  --color-rule: oklch(19% 0.012 250 / 0.1);
-  --color-rule-strong: oklch(19% 0.012 250 / 0.2);
+  /* Exact Arounda Brand Sheet Palette (#161316, #453027, #FF6D29, #BABABA, warm #FFFDFA white) */
+  --color-paper: #161316;
+  --color-paper-2: #211b1b;
+  --color-paper-3: #2d2220;
+  --color-field: #453027;
+  --color-ink: #fffdfa;
+  --color-ink-2: #bababa;
+  --color-muted: rgba(186, 186, 186, 0.54);
 
-  /* Single technical signal accent (Vermilion < 5% viewport) */
-  --color-signal: oklch(52% 0.185 36);
-  --color-signal-ink: oklch(98% 0.004 250);
-  --color-signal-soft: oklch(52% 0.185 36 / 0.11);
-  --color-focus: oklch(56% 0.19 36);
+  /* Signal & Stage Warm Spectrum */
+  --color-signal: #ff6d29;
+  --color-signal-hover: #ff8147;
+  --color-signal-ink: #161316;
+  --color-signal-soft: rgba(255, 109, 41, 0.16);
+  --color-focus: #ff854d;
 
-  /* Semantic feedback */
-  --color-positive: oklch(48% 0.15 148);
-  --color-positive-soft: oklch(48% 0.15 148 / 0.12);
-  --color-danger: oklch(51% 0.19 25);
-  --color-danger-soft: oklch(51% 0.19 25 / 0.12);
+  /* Preset Organic Stage Stops (Warm Arounda Family) */
+  --stage-classic-top: #ff6d29;
+  --stage-classic-mid: #b34218;
+  --stage-classic-low: #453027;
 
-  /* Elevation & track */
-  --shadow-subtle: 0 1px 2px oklch(20% 0.01 250 / 0.06);
-  --color-track: oklch(19% 0.012 250 / 0.16);
-  --color-grid: oklch(19% 0.012 250 / 0.07);
+  --stage-macbook-top: #f28338;
+  --stage-macbook-mid: #96481d;
+  --stage-macbook-low: #453027;
 
-  /* Spacing scale (4px grid) */
+  --stage-coding-top: #d95024;
+  --stage-coding-mid: #732f1c;
+  --stage-coding-low: #2b1d1b;
+
+  --stage-cinema-top: #ba5b30;
+  --stage-cinema-mid: #593527;
+  --stage-cinema-low: #261b1a;
+
+  /* Atmospheric Glows & Glass Capsules */
+  --color-ambient-espresso: rgba(69, 48, 39, 0.48);
+  --color-ambient-ember: rgba(255, 109, 41, 0.14);
+  --color-orb-warm: rgba(255, 134, 76, 0.72);
+  --color-orb-soft: rgba(255, 208, 180, 0.45);
+  --color-orb-deep: rgba(69, 48, 39, 0.82);
+
+  --color-rule: rgba(255, 255, 255, 0.08);
+  --color-pill-border: rgba(255, 255, 255, 0.14);
+  --color-pill-surface: rgba(69, 48, 39, 0.34);
+  --color-pill-surface-hover: rgba(69, 48, 39, 0.54);
+  --color-dock-bg: #261d1c;
+  --color-drawer-bg: #1c1617;
+
+  /* Semantic Status */
+  --color-positive: #58c48a;
+  --color-positive-soft: rgba(88, 196, 138, 0.15);
+  --color-danger: #f25f4c;
+  --color-danger-soft: rgba(242, 95, 76, 0.16);
+
+  --shadow-dock: 0 20px 44px rgba(7, 5, 7, 0.62);
+  --shadow-drawer: -16px 0 42px rgba(7, 5, 7, 0.58);
+
+  /* 4px Spacing Scale */
+  --space-0: 0px;
   --space-3xs: 2px;
   --space-2xs: 4px;
   --space-xs: 8px;
@@ -44,52 +74,29 @@
   --space-lg: 20px;
   --space-xl: 24px;
   --space-2xl: 32px;
-  --space-3xl: 48px;
+  --space-3xl: 40px;
+  --space-4xl: 48px;
+  --space-5xl: 64px;
 
-  /* Concentric radii */
-  --radius-keycap: 5px;
-  --radius-control: 8px;
-  --radius-card: 12px;
-  --radius-well: 14px;
+  /* Concentric Radii */
+  --radius-xs: 6px;
+  --radius-sm: 10px;
+  --radius-md: 14px;
+  --radius-lg: 20px;
+  --radius-xl: 28px;
+  --radius-pill: 999px;
 
-  /* Typography scale (1.15 app ratio, rem units) */
+  /* Type Scale (rem) */
   --text-xs: 0.75rem;
   --text-sm: 0.8125rem;
-  --text-ui: 0.875rem;
+  --text-ui: 0.9375rem;
   --text-body: 1rem;
-  --text-title: 1.125rem;
-  --text-heading: 1.25rem;
+  --text-panel-head: 2.125rem;
+  --text-stage-head: 3.375rem;
 
   /* Motion */
   --ease-out: cubic-bezier(0.22, 1, 0.36, 1);
-  --dur-micro: 140ms;
-  --dur-short: 200ms;
-}
-
-[data-theme="dark"] {
-  color-scheme: dark;
-
-  /* Machined Graphite neutral ramp */
-  --color-paper: oklch(16% 0.009 250);
-  --color-paper-2: oklch(20.5% 0.01 250);
-  --color-paper-3: oklch(25.5% 0.012 250);
-  --color-ink: oklch(94% 0.007 250);
-  --color-ink-2: oklch(73% 0.01 250);
-  --color-muted: oklch(60% 0.01 250);
-  --color-rule: oklch(94% 0.007 250 / 0.09);
-  --color-rule-strong: oklch(94% 0.007 250 / 0.18);
-
-  --color-signal: oklch(65% 0.185 38);
-  --color-signal-ink: oklch(16% 0.01 250);
-  --color-signal-soft: oklch(65% 0.185 38 / 0.15);
-  --color-focus: oklch(68% 0.19 38);
-
-  --color-positive: oklch(72% 0.15 150);
-  --color-positive-soft: oklch(72% 0.15 150 / 0.14);
-  --color-danger: oklch(66% 0.19 25);
-  --color-danger-soft: oklch(66% 0.19 25 / 0.14);
-
-  --shadow-subtle: 0 1px 2px oklch(8% 0.01 250 / 0.35);
-  --color-track: oklch(94% 0.007 250 / 0.18);
-  --color-grid: oklch(94% 0.007 250 / 0.07);
+  --dur-micro: 150ms;
+  --dur-short: 240ms;
+  --dur-stage: 460ms;
 }

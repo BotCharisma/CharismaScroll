@@ -3,6 +3,7 @@ import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 
 export type EasingCurve = "OutExpo" | "OutQuint" | "OutCubic" | "OutQuart" | "Linear";
 export type AppRuleMode = "Disabled" | "Custom";
+export type PresetId = "classic" | "macbook" | "coding" | "cinema";
 
 export interface ScrollProfile {
   stepSizePx: number;
@@ -34,8 +35,8 @@ export interface AppSettings {
   passthroughCtrlAlt: boolean;
   hotkey: string;
   targetFps: number;
-  language: "vi" | "en";
-  theme: "dark" | "light" | "system";
+  language: string;
+  theme: string;
   startWithWindows: boolean;
   startAsAdmin: boolean;
 }
@@ -62,7 +63,43 @@ export interface ScrollTelemetry {
   activeExe: string;
 }
 
-export const PRESET_PROFILES: Record<string, ScrollProfile> = {
+export interface PresetStageMeta {
+  id: PresetId;
+  line1: string;
+  line2: string;
+  summary: string;
+}
+
+export const PRESET_ORDER: PresetId[] = ["classic", "macbook", "coding", "cinema"];
+
+export const PRESET_STAGE_META: Record<PresetId, PresetStageMeta> = {
+  classic: {
+    id: "classic",
+    line1: "Classic",
+    line2: "flow",
+    summary: "Balanced everyday glide",
+  },
+  macbook: {
+    id: "macbook",
+    line1: "Trackpad",
+    line2: "glide",
+    summary: "Long exponential cushion",
+  },
+  coding: {
+    id: "coding",
+    line1: "Snappy",
+    line2: "code",
+    summary: "Crisp stop for editors",
+  },
+  cinema: {
+    id: "cinema",
+    line1: "Cinema",
+    line2: "drift",
+    summary: "Deep slow-settling travel",
+  },
+};
+
+export const PRESET_PROFILES: Record<PresetId, ScrollProfile> = {
   classic: {
     stepSizePx: 110,
     animationTimeMs: 420,
@@ -135,7 +172,7 @@ export function isTauriRuntime(): boolean {
   return typeof window !== "undefined" && "__TAURI_INTERNALS__" in window;
 }
 
-const STORAGE_KEY = "charisma_scroll_preview_settings_v1";
+const STORAGE_KEY = "charisma_scroll_obsidian_v2";
 
 function loadMockSettings(): AppSettings {
   try {
@@ -144,7 +181,7 @@ function loadMockSettings(): AppSettings {
       return JSON.parse(raw) as AppSettings;
     }
   } catch {
-    // Ignore storage read failure in restricted preview contexts
+    // Ignore storage read failure
   }
   return {
     enabled: true,
@@ -153,13 +190,13 @@ function loadMockSettings(): AppSettings {
     appRules: [
       {
         exeName: "Code.exe",
-        displayName: "Visual Studio Code",
+        displayName: "VS Code",
         mode: "Custom",
         profile: { ...PRESET_PROFILES.coding },
       },
       {
         exeName: "photoshop.exe",
-        displayName: "Adobe Photoshop",
+        displayName: "Photoshop",
         mode: "Disabled",
         profile: { ...PRESET_PROFILES.classic },
       },
@@ -169,7 +206,7 @@ function loadMockSettings(): AppSettings {
     passthroughCtrlAlt: true,
     hotkey: "Alt+Shift+S",
     targetFps: 0,
-    language: "vi",
+    language: "en",
     theme: "dark",
     startWithWindows: false,
     startAsAdmin: false,
@@ -185,9 +222,9 @@ function saveMockSettings(settings: AppSettings): AppSnapshot {
   return {
     settings,
     isAdmin: false,
-    detectedHz: 144,
+    detectedHz: 185,
     lastScrolledExe: "chrome.exe",
-    version: "1.0.0",
+    version: "0.2.0",
   };
 }
 
@@ -205,7 +242,7 @@ export async function updateSettings(settings: AppSettings): Promise<AppSnapshot
   return invoke<AppSnapshot>("update_settings", { settings });
 }
 
-export async function applyPreset(presetId: string): Promise<AppSnapshot> {
+export async function applyPreset(presetId: PresetId): Promise<AppSnapshot> {
   if (!isTauriRuntime()) {
     const current = loadMockSettings();
     const next: AppSettings = {
@@ -231,42 +268,33 @@ export async function getRunningApps(): Promise<RunningAppInfo[]> {
     return [
       { exeName: "chrome.exe", displayName: "Google Chrome", windowTitle: "Google Chrome" },
       { exeName: "msedge.exe", displayName: "Microsoft Edge", windowTitle: "Microsoft Edge" },
-      { exeName: "explorer.exe", displayName: "File Explorer", windowTitle: "File Explorer" },
+      { exeName: "Figma.exe", displayName: "Figma", windowTitle: "Figma" },
       { exeName: "Discord.exe", displayName: "Discord", windowTitle: "Discord" },
-      { exeName: "Figma.exe", displayName: "Figma", windowTitle: "Figma Desktop" },
     ];
   }
   return invoke<RunningAppInfo[]>("get_running_apps");
 }
 
 export async function elevateToAdmin(): Promise<void> {
-  if (!isTauriRuntime()) {
-    return;
-  }
+  if (!isTauriRuntime()) return;
   return invoke<void>("elevate_to_admin");
 }
 
 export async function setTelemetryActive(active: boolean): Promise<void> {
-  if (!isTauriRuntime()) {
-    return;
-  }
+  if (!isTauriRuntime()) return;
   return invoke<void>("set_telemetry_active", { active });
 }
 
 export async function subscribeSnapshotUpdated(
   cb: (snapshot: AppSnapshot) => void
 ): Promise<UnlistenFn> {
-  if (!isTauriRuntime()) {
-    return () => {};
-  }
+  if (!isTauriRuntime()) return () => {};
   return listen<AppSnapshot>("snapshot-updated", (event) => cb(event.payload));
 }
 
 export async function subscribeScrollTelemetry(
   cb: (sample: ScrollTelemetry) => void
 ): Promise<UnlistenFn> {
-  if (!isTauriRuntime()) {
-    return () => {};
-  }
+  if (!isTauriRuntime()) return () => {};
   return listen<ScrollTelemetry>("scroll-telemetry", (event) => cb(event.payload));
 }

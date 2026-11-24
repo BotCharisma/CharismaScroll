@@ -160,7 +160,7 @@ impl Default for AppSettings {
             passthrough_ctrl_alt: true,
             hotkey: "Alt+Shift+S".to_string(),
             target_fps: 0,
-            language: "vi".to_string(),
+            language: "en".to_string(),
             theme: "dark".to_string(),
             start_with_windows: false,
             start_as_admin: false,
@@ -177,12 +177,8 @@ impl AppSettings {
             rule.profile = rule.profile.clone().sanitized();
         }
         self.app_rules.retain(|r| !r.exe_name.is_empty());
-        if self.language != "vi" && self.language != "en" {
-            self.language = "vi".to_string();
-        }
-        if self.theme != "dark" && self.theme != "light" && self.theme != "system" {
-            self.theme = "dark".to_string();
-        }
+        self.language = "en".to_string();
+        self.theme = "dark".to_string();
         if self.hotkey.trim().is_empty() {
             self.hotkey = "Alt+Shift+S".to_string();
         }

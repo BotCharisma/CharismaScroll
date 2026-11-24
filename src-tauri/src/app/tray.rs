@@ -95,16 +95,9 @@ pub fn generate_tray_icon(active: bool) -> Image<'static> {
 
 pub fn build_tray_menu(app: &AppHandle, state: &SharedAppState) -> tauri::Result<Menu<tauri::Wry>> {
     let settings = state.settings.read().clone();
-    let is_vi = settings.language == "vi";
     let recent_exe = state.last_scrolled_exe.read().clone();
 
-    let toggle_label = if is_vi {
-        if settings.enabled {
-            format!("Đang bật làm mượt ({})", settings.hotkey)
-        } else {
-            format!("Đang tạm dừng ({})", settings.hotkey)
-        }
-    } else if settings.enabled {
+    let toggle_label = if settings.enabled {
         format!("Smoothing active ({})", settings.hotkey)
     } else {
         format!("Smoothing paused ({})", settings.hotkey)
@@ -115,7 +108,7 @@ pub fn build_tray_menu(app: &AppHandle, state: &SharedAppState) -> tauri::Result
     let preset_classic = CheckMenuItem::with_id(
         app,
         "preset:classic",
-        "SmoothScroll Classic",
+        "Classic Flow",
         true,
         settings.active_preset == "classic",
         None::<&str>,
@@ -123,7 +116,7 @@ pub fn build_tray_menu(app: &AppHandle, state: &SharedAppState) -> tauri::Result
     let preset_mac = CheckMenuItem::with_id(
         app,
         "preset:macbook",
-        "MacBook Trackpad",
+        "Trackpad Glide",
         true,
         settings.active_preset == "macbook",
         None::<&str>,
@@ -131,7 +124,7 @@ pub fn build_tray_menu(app: &AppHandle, state: &SharedAppState) -> tauri::Result
     let preset_coding = CheckMenuItem::with_id(
         app,
         "preset:coding",
-        "Snappy Coding",
+        "Snappy Code",
         true,
         settings.active_preset == "coding",
         None::<&str>,
@@ -139,21 +132,14 @@ pub fn build_tray_menu(app: &AppHandle, state: &SharedAppState) -> tauri::Result
     let preset_cinema = CheckMenuItem::with_id(
         app,
         "preset:cinema",
-        "Cinema Glide",
+        "Cinema Drift",
         true,
         settings.active_preset == "cinema",
         None::<&str>,
     )?;
 
-    let open_label = if is_vi {
-        "Mở bảng điều khiển CharismaScroll"
-    } else {
-        "Open CharismaScroll Studio"
-    };
-    let open_item = MenuItem::with_id(app, "open", open_label, true, None::<&str>)?;
-
-    let quit_label = if is_vi { "Thoát hoàn toàn" } else { "Quit CharismaScroll" };
-    let quit_item = MenuItem::with_id(app, "quit", quit_label, true, None::<&str>)?;
+    let open_item = MenuItem::with_id(app, "open", "Open CharismaScroll", true, None::<&str>)?;
+    let quit_item = MenuItem::with_id(app, "quit", "Quit CharismaScroll", true, None::<&str>)?;
 
     let menu = Menu::new(app)?;
     menu.append(&toggle_item)?;
@@ -168,16 +154,10 @@ pub fn build_tray_menu(app: &AppHandle, state: &SharedAppState) -> tauri::Result
             .app_rules
             .iter()
             .any(|r| r.exe_name.eq_ignore_ascii_case(&exe) && r.mode == AppRuleMode::Disabled);
-        let label = if is_vi {
-            if already_disabled {
-                format!("Bật lại làm mượt cho {exe}")
-            } else {
-                format!("Tắt làm mượt cho {exe}")
-            }
-        } else if already_disabled {
-            format!("Re-enable smoothing for {exe}")
+        let label = if already_disabled {
+            format!("Re-enable for {exe}")
         } else {
-            format!("Disable smoothing for {exe}")
+            format!("Bypass for {exe}")
         };
         let app_item = MenuItem::with_id(app, "toggle_recent_app", label, true, None::<&str>)?;
         menu.append(&PredefinedMenuItem::separator(app)?)?;
@@ -201,8 +181,8 @@ pub fn create_or_focus_main_window(app: &AppHandle) {
 
     if let Ok(win) = WebviewWindowBuilder::new(app, "main", WebviewUrl::App("index.html".into()))
         .title("CharismaScroll")
-        .inner_size(1020.0, 680.0)
-        .min_inner_size(880.0, 580.0)
+        .inner_size(960.0, 600.0)
+        .min_inner_size(860.0, 560.0)
         .center()
         .resizable(true)
         .decorations(false)

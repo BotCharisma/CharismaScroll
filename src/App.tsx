@@ -1,15 +1,16 @@
 import { useEffect, useState } from "react";
 import { AppsGameTab } from "./components/AppsGameTab";
-import { LiveWorkbench } from "./components/LiveWorkbench";
-import { ScrollStudioTab } from "./components/ScrollStudioTab";
+import { FloatingDock } from "./components/FloatingDock";
+import { MotionStagePanel } from "./components/MotionStagePanel";
+import { StageLeft, type StageSection } from "./components/StageLeft";
 import { SystemTab } from "./components/SystemTab";
-import { TopBar, type ActiveTab } from "./components/TopBar";
+import { TestPadDrawer } from "./components/TestPadDrawer";
 import { TitleBar } from "./components/TitleBar";
-import { COPY } from "./lib/i18n";
 import {
   applyPreset,
   elevateToAdmin,
   getAppSnapshot,
+  PRESET_ORDER,
   PRESET_PROFILES,
   setTelemetryActive,
   subscribeScrollTelemetry,
@@ -19,30 +20,30 @@ import {
   type AppRule,
   type AppSettings,
   type AppSnapshot,
+  type PresetId,
   type ScrollProfile,
   type ScrollTelemetry,
 } from "./lib/tauri";
 
-function readTabFromUrl(): ActiveTab {
-  if (typeof window === "undefined") return "scroll";
+function readSectionFromUrl(): StageSection {
+  if (typeof window === "undefined") return "motion";
   const param = new URLSearchParams(window.location.search).get("tab");
-  if (param === "apps" || param === "system" || param === "scroll") {
+  if (param === "apps" || param === "system" || param === "motion") {
     return param;
   }
-  return "scroll";
+  return "motion";
 }
 
 export function App() {
   const [snapshot, setSnapshot] = useState<AppSnapshot | null>(null);
-  const [activeTab, setActiveTab] = useState<ActiveTab>(readTabFromUrl);
+  const [activeSection, setActiveSection] = useState<StageSection>(readSectionFromUrl);
+  const [testPadOpen, setTestPadOpen] = useState(false);
   const [telemetry, setTelemetry] = useState<ScrollTelemetry | null>(null);
-  const [systemPrefersDark, setSystemPrefersDark] = useState<boolean>(() =>
-    typeof window !== "undefined"
-      ? window.matchMedia("(prefers-color-scheme: dark)").matches
-      : true
-  );
 
   useEffect(() => {
+    document.documentElement.lang = "en";
+    document.documentElement.dataset.theme = "dark";
+
     void getAppSnapshot().then(setSnapshot);
     void setTelemetryActive(true);
 
@@ -56,52 +57,28 @@ export function App() {
       unlistenTel = fn;
     });
 
-    const mq = window.matchMedia("(prefers-color-scheme: dark)");
-    const onMq = (e: MediaQueryListEvent) => setSystemPrefersDark(e.matches);
-    mq.addEventListener("change", onMq);
-
-    const onPop = () => setActiveTab(readTabFromUrl());
+    const onPop = () => setActiveSection(readSectionFromUrl());
     window.addEventListener("popstate", onPop);
 
     return () => {
       void setTelemetryActive(false);
       unlistenSnap?.();
       unlistenTel?.();
-      mq.removeEventListener("change", onMq);
       window.removeEventListener("popstate", onPop);
     };
   }, []);
 
-  const settings = snapshot?.settings;
-  const lang = settings?.language ?? "vi";
-  const resolvedTheme: "dark" | "light" =
-    settings?.theme === "system"
-      ? systemPrefersDark
-        ? "dark"
-        : "light"
-      : settings?.theme === "light"
-        ? "light"
-        : "dark";
-
-  useEffect(() => {
-    document.documentElement.lang = lang;
-    document.documentElement.dataset.theme = resolvedTheme;
-    const metaTheme = document.querySelector('meta[name="theme-color"]');
-    if (metaTheme) {
-      metaTheme.setAttribute("content", resolvedTheme === "dark" ? "#1c1f24" : "#f5f7fa");
-    }
-  }, [lang, resolvedTheme]);
-
-  const handleTabChange = (tab: ActiveTab) => {
-    setActiveTab(tab);
+  const handleSelectSection = (section: StageSection) => {
+    setActiveSection(section);
+    setTestPadOpen(false);
     const url = new URL(window.location.href);
-    url.searchParams.set("tab", tab);
+    url.searchParams.set("tab", section);
     window.history.replaceState(null, "", url.toString());
   };
 
-  if (!snapshot || !settings) {
-    return null;
-  }
+  if (!snapshot) return null;
+
+  const { settings } = snapshot;
 
   const commitSettings = (updater: AppSettings | ((prev: AppSettings) => AppSettings)) => {
     setSnapshot((prevSnap) => {
@@ -117,141 +94,108 @@ export function App() {
     void toggleEngine().then(setSnapshot);
   };
 
-  const handleSelectPreset = (presetId: string) => {
-    const nextProfile = PRESET_PROFILES[presetId] ?? PRESET_PROFILES.classic;
-    setSnapshot({
-      ...snapshot,
-      settings: {
-        ...settings,
-        activePreset: presetId,
-        globalProfile: { ...nextProfile },
-      },
-    });
-    void applyPreset(presetId).then(setSnapshot);
+  const handleCyclePreset = () => {
+    const curIdx = PRESET_ORDER.indexOf(settings.activePreset as PresetId);
+    const nextPreset: PresetId = PRESET_ORDER[(curIdx + 1) % PRESET_ORDER.length];
+    const nextProfile = PRESET_PROFILES[nextPreset];
+
+    setSnapshot((prev) =>
+      prev
+        ? {
+            ...prev,
+            settings: {
+              ...prev.settings,
+              activePreset: nextPreset,
+              globalProfile: { ...nextProfile },
+            },
+          }
+        : prev
+    );
+    void applyPreset(nextPreset).then(setSnapshot);
   };
 
   const handleChangeGlobalProfile = (nextProfile: ScrollProfile) => {
-    commitSettings({
-      ...settings,
+    commitSettings((prev) => ({
+      ...prev,
       activePreset: "custom",
       globalProfile: nextProfile,
-    });
+    }));
   };
 
   const handleChangeRules = (appRules: AppRule[]) => {
-    commitSettings({ ...settings, appRules });
-  };
-
-  const handleResetDefaults = () => {
-    commitSettings({
-      enabled: true,
-      activePreset: "classic",
-      globalProfile: { ...PRESET_PROFILES.classic },
-      appRules: [],
-      gameModeFullscreen: true,
-      bypassTouchpad: true,
-      passthroughCtrlAlt: true,
-      hotkey: "Alt+Shift+S",
-      targetFps: 0,
-      language: settings.language,
-      theme: settings.theme,
-      startWithWindows: false,
-      startAsAdmin: false,
-    });
+    commitSettings((prev) => ({ ...prev, appRules }));
   };
 
   return (
-    <div className="app-shell">
-      <a className="skip-link" href="#main-workbench">
-        {COPY[lang].skipToMain}
+    <div className="stage-shell">
+      <a className="skip-link" href="#stage-main">
+        Skip to workspace controls
       </a>
 
-      <TitleBar
-        detectedHz={snapshot.detectedHz}
-        targetFps={settings.targetFps}
-        lang={lang}
-        onToggleLang={() =>
-          commitSettings((prev) => ({
-            ...prev,
-            language: prev.language === "vi" ? "en" : "vi",
-          }))
-        }
-        resolvedTheme={resolvedTheme}
-        onToggleTheme={() =>
-          commitSettings((prev) => ({
-            ...prev,
-            theme:
-              (prev.theme === "system"
-                ? systemPrefersDark
-                  ? "dark"
-                  : "light"
-                : prev.theme) === "dark"
-                ? "light"
-                : "dark",
-          }))
-        }
+      <TitleBar detectedHz={snapshot.detectedHz} targetFps={settings.targetFps} />
+
+      <StageLeft
+        activePreset={settings.activePreset}
+        activeSection={activeSection}
+        onSelectSection={handleSelectSection}
+        telemetry={telemetry}
       />
 
-      <TopBar
-        activeTab={activeTab}
-        onTabChange={handleTabChange}
+      <main
+        id="stage-main"
+        className={testPadOpen ? "stage-right is-covered" : "stage-right"}
+      >
+        {activeSection === "motion" && (
+          <MotionStagePanel
+            profile={settings.globalProfile}
+            activePreset={settings.activePreset}
+            onChangeProfile={handleChangeGlobalProfile}
+          />
+        )}
+
+        {activeSection === "apps" && (
+          <AppsGameTab
+            gameModeFullscreen={settings.gameModeFullscreen}
+            onToggleGameMode={() =>
+              commitSettings((prev) => ({
+                ...prev,
+                gameModeFullscreen: !prev.gameModeFullscreen,
+              }))
+            }
+            appRules={settings.appRules}
+            globalProfile={settings.globalProfile}
+            onChangeRules={handleChangeRules}
+          />
+        )}
+
+        {activeSection === "system" && (
+          <SystemTab
+            settings={settings}
+            isAdmin={snapshot.isAdmin}
+            detectedHz={snapshot.detectedHz}
+            onUpdateSettings={commitSettings}
+            onElevate={() => void elevateToAdmin()}
+          />
+        )}
+      </main>
+
+      <FloatingDock
         enabled={settings.enabled}
         onToggleEnabled={handleToggleEnabled}
-        hotkey={settings.hotkey}
-        lang={lang}
+        profile={settings.globalProfile}
+        onChangeProfile={handleChangeGlobalProfile}
+        onCyclePreset={handleCyclePreset}
       />
 
-      <div className="workbench-scroll">
-        <main id="main-workbench" className="workbench-grid">
-          {activeTab === "scroll" && (
-            <ScrollStudioTab
-              profile={settings.globalProfile}
-              activePreset={settings.activePreset}
-              onSelectPreset={handleSelectPreset}
-              onChangeProfile={handleChangeGlobalProfile}
-              lang={lang}
-            />
-          )}
-
-          {activeTab === "apps" && (
-            <AppsGameTab
-              gameModeFullscreen={settings.gameModeFullscreen}
-              onToggleGameMode={() =>
-                commitSettings((prev) => ({
-                  ...prev,
-                  gameModeFullscreen: !prev.gameModeFullscreen,
-                }))
-              }
-              appRules={settings.appRules}
-              globalProfile={settings.globalProfile}
-              onChangeRules={handleChangeRules}
-              lang={lang}
-            />
-          )}
-
-          {activeTab === "system" && (
-            <SystemTab
-              settings={settings}
-              isAdmin={snapshot.isAdmin}
-              detectedHz={snapshot.detectedHz}
-              onUpdateSettings={commitSettings}
-              onElevate={() => void elevateToAdmin()}
-              onResetDefaults={handleResetDefaults}
-              lang={lang}
-            />
-          )}
-
-          <LiveWorkbench
-            profile={settings.globalProfile}
-            enabled={settings.enabled}
-            detectedHz={snapshot.detectedHz}
-            targetFps={settings.targetFps}
-            telemetry={telemetry}
-            lang={lang}
-          />
-        </main>
-      </div>
+      <TestPadDrawer
+        open={testPadOpen}
+        onToggleOpen={() => setTestPadOpen((v) => !v)}
+        profile={settings.globalProfile}
+        enabled={settings.enabled}
+        telemetry={telemetry}
+      />
     </div>
   );
 }
+
 export default App;
