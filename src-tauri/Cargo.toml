@@ -1,0 +1,43 @@
+[package]
+name = "charisma-scroll"
+version = "1.0.0"
+description = "System-wide smooth mouse wheel studio for Windows"
+authors = ["CharismaScroll"]
+edition = "2021"
+
+[[bin]]
+name = "CharismaScroll"
+path = "src/main.rs"
+
+[lib]
+name = "charisma_scroll_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+tauri = { version = "2", features = ["tray-icon", "image-png"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+parking_lot = "0.12"
+crossbeam-channel = "0.5"
+
+[dependencies.windows]
+version = "0.58"
+features = [
+  "Win32_Foundation",
+  "Win32_UI_WindowsAndMessaging",
+  "Win32_UI_Input_KeyboardAndMouse",
+  "Win32_UI_Shell",
+  "Win32_System_Threading",
+  "Win32_System_ProcessStatus",
+  "Win32_Graphics_Gdi",
+  "Win32_Security",
+]
+
+[profile.release]
+lto = "thin"
+codegen-units = 1
+strip = true
+panic = "abort"
