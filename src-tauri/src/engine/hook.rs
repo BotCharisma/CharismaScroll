@@ -4,16 +4,18 @@ use crate::platform::{detect_monitor_hz_for_window, is_window_fullscreen_game, p
 use crossbeam_channel::Sender;
 use parking_lot::RwLock;
 use std::cell::RefCell;
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
 use std::sync::{Arc, OnceLock};
 use std::time::{Duration, Instant};
 use windows::Win32::Foundation::{HWND, LPARAM, LRESULT, WPARAM};
-use windows::Win32::System::Threading::{GetCurrentThread, SetThreadPriority, THREAD_PRIORITY_HIGHEST};
+use windows::Win32::System::Threading::{
+    GetCurrentThread, GetCurrentThreadId, SetThreadPriority, THREAD_PRIORITY_HIGHEST,
+};
 use windows::Win32::UI::Input::KeyboardAndMouse::{GetAsyncKeyState, VK_CONTROL, VK_MENU, VK_SHIFT};
 use windows::Win32::UI::WindowsAndMessaging::{
-    CallNextHookEx, DispatchMessageW, GetAncestor, GetMessageW, SetWindowsHookExW,
-    TranslateMessage, UnhookWindowsHookEx, WindowFromPoint, GA_ROOT, MSG, MSLLHOOKSTRUCT,
-    WH_MOUSE_LL, WM_MOUSEHWHEEL, WM_MOUSEWHEEL,
+    CallNextHookEx, DispatchMessageW, GetAncestor, GetMessageW, PostThreadMessageW,
+    SetWindowsHookExW, TranslateMessage, UnhookWindowsHookEx, WindowFromPoint, GA_ROOT, MSG,
+    MSLLHOOKSTRUCT, WH_MOUSE_LL, WM_MOUSEHWHEEL, WM_MOUSEWHEEL, WM_QUIT,
 };
 
 #[derive(Clone)]
@@ -26,7 +28,7 @@ struct CachedTarget {
 }
 
 pub struct HookContext {
-    pub settings: Arc<RwLock<AppSettings>>,
+    pub settings: Arc<RwLock<Arc<AppSettings>>>,
     pub tx: Sender<EngineCommand>,
     pub enabled: Arc<AtomicBool>,
     pub last_scrolled_exe: Arc<RwLock<Option<String>>>,
@@ -34,6 +36,7 @@ pub struct HookContext {
 }
 
 static GLOBAL_HOOK_CTX: OnceLock<Arc<HookContext>> = OnceLock::new();
+static HOOK_THREAD_ID: AtomicU32 = AtomicU32::new(0);
 
 thread_local! {
     static TARGET_CACHE: RefCell<Option<CachedTarget>> = const { RefCell::new(None) };
@@ -72,7 +75,7 @@ unsafe extern "system" fn mouse_hook_proc(code: i32, wparam: WPARAM, lparam: LPA
         return CallNextHookEx(None, code, wparam, lparam);
     }
 
-    let settings = ctx.settings.read().clone();
+    let settings = Arc::clone(&ctx.settings.read());
 
     // Ctrl or Alt held -> cancel residual momentum & pass raw wheel for zoom / app shortcuts
     if settings.passthrough_ctrl_alt && (is_vk_down(VK_CONTROL.0) || is_vk_down(VK_MENU.0)) {
@@ -108,7 +111,7 @@ unsafe extern "system" fn mouse_hook_proc(code: i32, wparam: WPARAM, lparam: LPA
         return CallNextHookEx(None, code, wparam, lparam);
     }
 
-    let mut active_profile = settings.global_profile;
+    let mut active_profile = settings.global_profile.clone();
     if !target.exe_name.is_empty() {
         if let Some(rule) = settings
             .app_rules
@@ -210,9 +213,12 @@ pub fn spawn_mouse_hook_thread(ctx: Arc<HookContext>) {
     std::thread::Builder::new()
         .name("charisma-mouse-hook".to_string())
         .spawn(|| unsafe {
+            HOOK_THREAD_ID.store(GetCurrentThreadId(), Ordering::Relaxed);
             let _ = SetThreadPriority(GetCurrentThread(), THREAD_PRIORITY_HIGHEST);
-            let hook = SetWindowsHookExW(WH_MOUSE_LL, Some(mouse_hook_proc), None, 0)
-                .expect("Failed to install WH_MOUSE_LL hook");
+            let Ok(hook) = SetWindowsHookExW(WH_MOUSE_LL, Some(mouse_hook_proc), None, 0) else {
+                HOOK_THREAD_ID.store(0, Ordering::Relaxed);
+                return;
+            };
 
             let mut msg = MSG::default();
             while GetMessageW(&mut msg, None, 0, 0).as_bool() {
@@ -220,6 +226,16 @@ pub fn spawn_mouse_hook_thread(ctx: Arc<HookContext>) {
                 DispatchMessageW(&msg);
             }
             let _ = UnhookWindowsHookEx(hook);
+            HOOK_THREAD_ID.store(0, Ordering::Relaxed);
         })
         .expect("Failed to spawn WH_MOUSE_LL thread");
+}
+
+pub fn stop_mouse_hook_thread() {
+    let tid = HOOK_THREAD_ID.swap(0, Ordering::Relaxed);
+    if tid != 0 {
+        unsafe {
+            let _ = PostThreadMessageW(tid, WM_QUIT, WPARAM(0), LPARAM(0));
+        }
+    }
 }

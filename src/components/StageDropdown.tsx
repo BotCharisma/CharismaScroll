@@ -1,4 +1,5 @@
-import { useEffect, useRef, useState, type KeyboardEvent } from "react";
+import { useEffect, useLayoutEffect, useRef, useState, type CSSProperties, type KeyboardEvent } from "react";
+import { createPortal } from "react-dom";
 import { Check, ChevronDown } from "lucide-react";
 
 export interface DropdownOption {
@@ -31,14 +32,73 @@ export function StageDropdown({
   minWidthClass = "",
 }: StageDropdownProps) {
   const [open, setOpen] = useState(false);
+  const [menuStyle, setMenuStyle] = useState<CSSProperties | null>(null);
   const rootRef = useRef<HTMLDivElement | null>(null);
+  const triggerRef = useRef<HTMLButtonElement | null>(null);
+  const menuRef = useRef<HTMLUListElement | null>(null);
 
   const selected = options.find((opt) => opt.value === value);
+
+  useLayoutEffect(() => {
+    if (!open) {
+      setMenuStyle(null);
+      return;
+    }
+
+    const updatePosition = () => {
+      const trigger = triggerRef.current;
+      if (!trigger) return;
+      const rect = trigger.getBoundingClientRect();
+      const gap = 6;
+      const margin = 12;
+      const spaceBelow = window.innerHeight - rect.bottom - gap - margin;
+      const spaceAbove = rect.top - gap - margin;
+      const openUp =
+        direction === "up"
+          ? spaceAbove >= 120 || spaceAbove >= spaceBelow
+          : spaceBelow < 160 && spaceAbove > spaceBelow;
+
+      const width = Math.max(rect.width, 168);
+      const maxLeft = Math.max(margin, window.innerWidth - width - margin);
+      const left = Math.min(Math.max(margin, rect.left), maxLeft);
+
+      if (openUp) {
+        setMenuStyle({
+          position: "fixed",
+          left,
+          bottom: window.innerHeight - rect.top + gap,
+          width,
+          maxHeight: Math.max(120, Math.min(264, spaceAbove)),
+        });
+      } else {
+        setMenuStyle({
+          position: "fixed",
+          left,
+          top: rect.bottom + gap,
+          width,
+          maxHeight: Math.max(120, Math.min(264, spaceBelow)),
+        });
+      }
+    };
+
+    updatePosition();
+    window.addEventListener("resize", updatePosition);
+    window.addEventListener("scroll", updatePosition, true);
+    return () => {
+      window.removeEventListener("resize", updatePosition);
+      window.removeEventListener("scroll", updatePosition, true);
+    };
+  }, [open, direction]);
 
   useEffect(() => {
     if (!open) return;
     const onPointerDown = (e: MouseEvent) => {
-      if (rootRef.current && !rootRef.current.contains(e.target as Node)) {
+      const target = e.target as Node;
+      if (
+        rootRef.current &&
+        !rootRef.current.contains(target) &&
+        (!menuRef.current || !menuRef.current.contains(target))
+      ) {
         setOpen(false);
       }
     };
@@ -72,6 +132,7 @@ export function StageDropdown({
   return (
     <div ref={rootRef} className={`cs-dropdown ${minWidthClass}`}>
       <button
+        ref={triggerRef}
         id={id}
         type="button"
         role="combobox"
@@ -94,49 +155,54 @@ export function StageDropdown({
         />
       </button>
 
-      {open && (
-        <ul
-          id={`${id}-listbox`}
-          role="listbox"
-          aria-label={ariaLabel}
-          className={`cs-dropdown-menu cs-dropdown-${direction}`}
-        >
-          {options.map((opt) => {
-            const isSelected = opt.value === value;
-            return (
-              <li key={opt.value} role="option" aria-selected={isSelected}>
-                <button
-                  type="button"
-                  className={`cs-dropdown-item${mono ? " mono-num" : ""}${
-                    isSelected ? " is-selected" : ""
-                  }`}
-                  onClick={() => {
-                    onChange(opt.value);
-                    setOpen(false);
-                  }}
-                >
-                  <span className="cs-dropdown-item-text">
-                    <span>{opt.label}</span>
-                    {opt.sublabel && (
-                      <span className="cs-dropdown-sub mono-num" translate="no">
-                        {opt.sublabel}
-                      </span>
+      {open &&
+        menuStyle &&
+        createPortal(
+          <ul
+            ref={menuRef}
+            id={`${id}-listbox`}
+            role="listbox"
+            aria-label={ariaLabel}
+            className="cs-dropdown-menu"
+            style={menuStyle}
+          >
+            {options.map((opt) => {
+              const isSelected = opt.value === value;
+              return (
+                <li key={opt.value} role="option" aria-selected={isSelected}>
+                  <button
+                    type="button"
+                    className={`cs-dropdown-item${mono ? " mono-num" : ""}${
+                      isSelected ? " is-selected" : ""
+                    }`}
+                    onClick={() => {
+                      onChange(opt.value);
+                      setOpen(false);
+                    }}
+                  >
+                    <span className="cs-dropdown-item-text">
+                      <span>{opt.label}</span>
+                      {opt.sublabel && (
+                        <span className="cs-dropdown-sub mono-num" translate="no">
+                          {opt.sublabel}
+                        </span>
+                      )}
+                    </span>
+                    {isSelected && (
+                      <Check
+                        size={13}
+                        strokeWidth={2}
+                        className="cs-dropdown-check"
+                        aria-hidden="true"
+                      />
                     )}
-                  </span>
-                  {isSelected && (
-                    <Check
-                      size={13}
-                      strokeWidth={2}
-                      className="cs-dropdown-check"
-                      aria-hidden="true"
-                    />
-                  )}
-                </button>
-              </li>
-            );
-          })}
-        </ul>
-      )}
+                  </button>
+                </li>
+              );
+            })}
+          </ul>,
+          document.body
+        )}
     </div>
   );
 }

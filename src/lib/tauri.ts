@@ -261,8 +261,22 @@ function saveMockState(settings: AppSettings, presets?: CustomPreset[]): AppSnap
     isAdmin: false,
     detectedHz: 185,
     lastScrolledExe: "chrome.exe",
-    version: "0.2.0",
+    version: "0.3.0",
   };
+}
+
+export interface UpdateInfo {
+  available: boolean;
+  currentVersion: string;
+  version: string | null;
+  body: string | null;
+  date: string | null;
+}
+
+export interface UpdateProgressPayload {
+  downloaded: number;
+  total: number | null;
+  stage: "downloading" | "installing";
 }
 
 export async function getAppSnapshot(): Promise<AppSnapshot> {
@@ -381,4 +395,61 @@ export async function subscribeScrollTelemetry(
 ): Promise<UnlistenFn> {
   if (!isTauriRuntime()) return () => {};
   return listen<ScrollTelemetry>("scroll-telemetry", (event) => cb(event.payload));
+}
+
+export async function subscribeTrayMenuOpened(cb: () => void): Promise<UnlistenFn> {
+  if (!isTauriRuntime()) return () => {};
+  return listen<void>("tray-menu-opened", () => cb());
+}
+
+export async function trayOpenMain(): Promise<void> {
+  if (!isTauriRuntime()) return;
+  return invoke<void>("tray_open_main");
+}
+
+export async function trayQuitApp(): Promise<void> {
+  if (!isTauriRuntime()) return;
+  return invoke<void>("tray_quit_app");
+}
+
+export async function trayHideMenu(): Promise<void> {
+  if (!isTauriRuntime()) return;
+  return invoke<void>("tray_hide_menu");
+}
+
+export async function trayResizeMenu(height: number): Promise<void> {
+  if (!isTauriRuntime()) return;
+  return invoke<void>("tray_resize_menu", { height });
+}
+
+export async function trayToggleRecentApp(): Promise<AppSnapshot> {
+  if (!isTauriRuntime()) {
+    return getAppSnapshot();
+  }
+  return invoke<AppSnapshot>("tray_toggle_recent_app");
+}
+
+export async function checkForUpdate(): Promise<UpdateInfo> {
+  if (!isTauriRuntime()) {
+    return {
+      available: false,
+      currentVersion: "0.3.0",
+      version: null,
+      body: null,
+      date: null,
+    };
+  }
+  return invoke<UpdateInfo>("check_for_update");
+}
+
+export async function installUpdate(): Promise<void> {
+  if (!isTauriRuntime()) return;
+  return invoke<void>("install_update");
+}
+
+export async function subscribeUpdateProgress(
+  cb: (progress: UpdateProgressPayload) => void
+): Promise<UnlistenFn> {
+  if (!isTauriRuntime()) return () => {};
+  return listen<UpdateProgressPayload>("update-progress", (event) => cb(event.payload));
 }

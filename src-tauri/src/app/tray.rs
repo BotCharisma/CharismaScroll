@@ -1,14 +1,28 @@
 use crate::app::commands::SharedAppState;
-use crate::config::{
-    load_custom_presets, resolve_preset_profile, AppRule, AppRuleMode, ScrollProfile,
-};
-use std::sync::atomic::Ordering;
+use crate::platform::{is_windows_system_light_theme, monitor_work_area_at_point};
+use parking_lot::Mutex;
+use std::sync::atomic::{AtomicU64, Ordering};
+use std::time::{Duration, Instant};
 use tauri::image::Image;
-use tauri::menu::{CheckMenuItem, Menu, MenuItem, PredefinedMenuItem};
 use tauri::tray::{MouseButton, MouseButtonState, TrayIcon, TrayIconBuilder, TrayIconEvent};
-use tauri::{AppHandle, Emitter, Manager, WebviewUrl, WebviewWindowBuilder};
+use tauri::window::Color;
+use tauri::{
+    AppHandle, Emitter, LogicalSize, Manager, PhysicalPosition, WebviewUrl, WebviewWindowBuilder,
+};
 
 const TRAY_ID: &str = "charisma-tray";
+pub const TRAY_MENU_LABEL: &str = "tray-menu";
+const TRAY_MENU_WIDTH: f64 = 256.0;
+const TRAY_MENU_DEFAULT_HEIGHT: f64 = 332.0;
+const TRAY_IDLE_RELEASE_SECS: u64 = 25;
+
+const TRAY_ICON_PNG: &[u8] = include_bytes!("../../icons/32x32.png");
+const TASKBAR_LIGHT_PNG: &[u8] = include_bytes!("../../icons/taskbar-light-64.png");
+const TASKBAR_DARK_PNG: &[u8] = include_bytes!("../../icons/taskbar-dark-64.png");
+
+static LAST_TRAY_ANCHOR: Mutex<(f64, f64)> = Mutex::new((0.0, 0.0));
+static LAST_TRAY_HIDE: Mutex<Option<Instant>> = Mutex::new(None);
+static TRAY_MENU_HIDE_GEN: AtomicU64 = AtomicU64::new(0);
 
 #[link(name = "dwmapi")]
 extern "system" {
@@ -34,163 +48,178 @@ fn apply_win11_rounding(win: &tauri::WebviewWindow) {
     }
 }
 
-pub fn generate_tray_icon(active: bool) -> Image<'static> {
-    let size = 32usize;
-    let mut rgba = vec![0u8; size * size * 4];
-    let cx = 15.5_f32;
-    let cy = 15.5_f32;
-
-    for y in 0..size {
-        for x in 0..size {
-            let idx = (y * size + x) * 4;
-            let dx = (x as f32 - cx).abs();
-            let dy = (y as f32 - cy).abs();
-            let qx = (dx - 9.0).max(0.0);
-            let qy = (dy - 9.0).max(0.0);
-            let dist = (qx * qx + qy * qy).sqrt() - 5.0;
-
-            if dist > 0.6 {
-                continue;
-            }
-
-            let alpha = (0.6 - dist).clamp(0.0, 1.0);
-            let (mut r, mut g, mut b) = if active {
-                (26u8, 28u8, 33u8)
-            } else {
-                (38u8, 40u8, 44u8)
-            };
-
-            if dist > -1.3 {
-                (r, g, b) = if active { (82, 88, 100) } else { (72, 75, 80) };
-            }
-
-            // Mouse wheel capsule outline
-            let hx = (dx - 2.8).max(0.0);
-            let hy = (dy - 6.8).max(0.0);
-            let h_dist = (hx * hx + hy * hy).sqrt() - 3.2;
-            if h_dist <= 0.0 && h_dist >= -1.7 {
-                (r, g, b) = if active {
-                    (232, 236, 244)
-                } else {
-                    (150, 155, 162)
-                };
-            }
-
-            // Center wheel notch
-            if dx <= 1.8 && dy <= 4.2 {
-                (r, g, b) = if active {
-                    (236, 94, 56) // Vermilion signal when active
-                } else {
-                    (130, 134, 140)
-                };
-            }
-
-            rgba[idx] = r;
-            rgba[idx + 1] = g;
-            rgba[idx + 2] = b;
-            rgba[idx + 3] = (alpha * 255.0) as u8;
-        }
+/// Adaptive taskbar icon: Light Ivory on Dark Windows taskbar, Dark Espresso on Light Windows taskbar.
+pub fn apply_adaptive_taskbar_icon(win: &tauri::WebviewWindow) {
+    let bytes = if is_windows_system_light_theme() {
+        TASKBAR_DARK_PNG
+    } else {
+        TASKBAR_LIGHT_PNG
+    };
+    if let Ok(img) = Image::from_bytes(bytes) {
+        let _ = win.set_icon(img);
     }
-
-    Image::new_owned(rgba, size as u32, size as u32)
 }
 
-pub fn build_tray_menu(app: &AppHandle, state: &SharedAppState) -> tauri::Result<Menu<tauri::Wry>> {
-    let settings = state.settings.read().clone();
-    let recent_exe = state.last_scrolled_exe.read().clone();
+pub fn refresh_taskbar_icon(app: &AppHandle) {
+    let app_clone = app.clone();
+    let _ = app.run_on_main_thread(move || {
+        if let Some(win) = app_clone.get_webview_window("main") {
+            apply_adaptive_taskbar_icon(&win);
+        }
+    });
+}
 
-    let toggle_label = if settings.enabled {
-        format!("Smoothing active ({})", settings.hotkey)
+/// System Tray icon: Vivid Ember Orange when Active, soft grayscale when Paused.
+pub fn generate_tray_icon(active: bool) -> Image<'static> {
+    if let Ok(img) = Image::from_bytes(TRAY_ICON_PNG) {
+        let width = img.width();
+        let height = img.height();
+        let mut rgba = img.rgba().to_vec();
+        if !active {
+            for px in rgba.chunks_exact_mut(4) {
+                let lum = ((px[0] as u32 * 77 + px[1] as u32 * 150 + px[2] as u32 * 29) >> 8) as u8;
+                let dimmed = ((lum as u32 * 168) >> 8) as u8;
+                px[0] = dimmed;
+                px[1] = dimmed;
+                px[2] = dimmed;
+                px[3] = ((px[3] as u32 * 195) >> 8) as u8;
+            }
+        }
+        return Image::new_owned(rgba, width, height);
+    }
+
+    Image::new_owned(vec![0u8; 32 * 32 * 4], 32, 32)
+}
+
+pub fn ensure_tray_menu_window(app: &AppHandle) -> Option<tauri::WebviewWindow> {
+    if let Some(win) = app.get_webview_window(TRAY_MENU_LABEL) {
+        return Some(win);
+    }
+
+    if let Ok(win) = WebviewWindowBuilder::new(
+        app,
+        TRAY_MENU_LABEL,
+        WebviewUrl::App("index.html?view=tray".into()),
+    )
+    .title("CharismaScroll Tray")
+    .inner_size(TRAY_MENU_WIDTH, TRAY_MENU_DEFAULT_HEIGHT)
+    .resizable(false)
+    .decorations(false)
+    .skip_taskbar(true)
+    .always_on_top(true)
+    .visible(false)
+    .shadow(true)
+    .background_color(Color(28, 22, 23, 255))
+    .build()
+    {
+        apply_win11_rounding(&win);
+        return Some(win);
+    }
+    None
+}
+
+fn position_tray_menu(win: &tauri::WebviewWindow, anchor_x: f64, anchor_y: f64, logical_h: f64) {
+    let scale = win.scale_factor().unwrap_or(1.0);
+    let phys_w = (TRAY_MENU_WIDTH * scale).round() as i32;
+    let phys_h = (logical_h * scale).round() as i32;
+    let margin = (10.0 * scale).round() as i32;
+    let gap = (8.0 * scale).round() as i32;
+
+    let (work_l, work_t, work_r, work_b) =
+        monitor_work_area_at_point(anchor_x.round() as i32, anchor_y.round() as i32);
+
+    let desired_x = anchor_x.round() as i32 - phys_w / 2;
+    let clamped_x = desired_x.clamp(work_l + margin, (work_r - phys_w - margin).max(work_l + margin));
+
+    // Prefer opening above the click point; clamp strictly inside monitor work area
+    let above_y = anchor_y.round() as i32 - phys_h - gap;
+    let below_y = anchor_y.round() as i32 + gap;
+    let desired_y = if above_y >= work_t + margin {
+        above_y
+    } else if below_y + phys_h <= work_b - margin {
+        below_y
     } else {
-        format!("Smoothing paused ({})", settings.hotkey)
+        work_b - phys_h - margin
     };
+    let clamped_y = desired_y.clamp(work_t + margin, (work_b - phys_h - margin).max(work_t + margin));
 
-    let toggle_item = CheckMenuItem::with_id(app, "toggle", toggle_label, true, settings.enabled, None::<&str>)?;
+    let _ = win.set_position(PhysicalPosition::new(clamped_x, clamped_y));
+}
 
-    let preset_classic = CheckMenuItem::with_id(
-        app,
-        "preset:classic",
-        "Classic Flow",
-        true,
-        settings.active_preset == "classic",
-        None::<&str>,
-    )?;
-    let preset_mac = CheckMenuItem::with_id(
-        app,
-        "preset:macbook",
-        "Trackpad Glide",
-        true,
-        settings.active_preset == "macbook",
-        None::<&str>,
-    )?;
-    let preset_coding = CheckMenuItem::with_id(
-        app,
-        "preset:coding",
-        "Snappy Code",
-        true,
-        settings.active_preset == "coding",
-        None::<&str>,
-    )?;
-    let preset_cinema = CheckMenuItem::with_id(
-        app,
-        "preset:cinema",
-        "Cinema Drift",
-        true,
-        settings.active_preset == "cinema",
-        None::<&str>,
-    )?;
+pub fn hide_tray_menu(app: &AppHandle) {
+    if let Some(win) = app.get_webview_window(TRAY_MENU_LABEL) {
+        if win.is_visible().unwrap_or(false) {
+            *LAST_TRAY_HIDE.lock() = Some(Instant::now());
+        }
+        let _ = win.hide();
 
-    let open_item = MenuItem::with_id(app, "open", "Open CharismaScroll", true, None::<&str>)?;
-    let quit_item = MenuItem::with_id(app, "quit", "Quit CharismaScroll", true, None::<&str>)?;
+        // Release WebView2 tray popup memory after idle period so background tray stays ~8-15 MB
+        let gen = TRAY_MENU_HIDE_GEN.fetch_add(1, Ordering::SeqCst) + 1;
+        let app_clone = app.clone();
+        std::thread::spawn(move || {
+            std::thread::sleep(Duration::from_secs(TRAY_IDLE_RELEASE_SECS));
+            if TRAY_MENU_HIDE_GEN.load(Ordering::SeqCst) == gen {
+                let app_main = app_clone.clone();
+                let _ = app_clone.run_on_main_thread(move || {
+                    if TRAY_MENU_HIDE_GEN.load(Ordering::SeqCst) == gen {
+                        if let Some(w) = app_main.get_webview_window(TRAY_MENU_LABEL) {
+                            if !w.is_visible().unwrap_or(false) {
+                                let _ = w.close();
+                            }
+                        }
+                    }
+                });
+            }
+        });
+    }
+}
 
-    let menu = Menu::new(app)?;
-    menu.append(&toggle_item)?;
-    menu.append(&PredefinedMenuItem::separator(app)?)?;
-    menu.append(&preset_classic)?;
-    menu.append(&preset_mac)?;
-    menu.append(&preset_coding)?;
-    menu.append(&preset_cinema)?;
-
-    let custom_presets = load_custom_presets();
-    if !custom_presets.is_empty() {
-        menu.append(&PredefinedMenuItem::separator(app)?)?;
-        for cp in custom_presets {
-            let item = CheckMenuItem::with_id(
-                app,
-                format!("preset:{}", cp.id),
-                cp.name,
-                true,
-                settings.active_preset == cp.id,
-                None::<&str>,
-            )?;
-            menu.append(&item)?;
+pub fn resize_tray_menu(app: &AppHandle, logical_height: f64) {
+    let clamped_h = logical_height.clamp(160.0, 520.0);
+    if let Some(win) = app.get_webview_window(TRAY_MENU_LABEL) {
+        let _ = win.set_size(LogicalSize::new(TRAY_MENU_WIDTH, clamped_h));
+        let (ax, ay) = *LAST_TRAY_ANCHOR.lock();
+        if ax != 0.0 || ay != 0.0 {
+            position_tray_menu(&win, ax, ay, clamped_h);
         }
     }
+}
 
-    if let Some(exe) = recent_exe {
-        let already_disabled = settings
-            .app_rules
-            .iter()
-            .any(|r| r.exe_name.eq_ignore_ascii_case(&exe) && r.mode == AppRuleMode::Disabled);
-        let label = if already_disabled {
-            format!("Re-enable for {exe}")
-        } else {
-            format!("Bypass for {exe}")
-        };
-        let app_item = MenuItem::with_id(app, "toggle_recent_app", label, true, None::<&str>)?;
-        menu.append(&PredefinedMenuItem::separator(app)?)?;
-        menu.append(&app_item)?;
+pub fn toggle_tray_menu_popup(app: &AppHandle, click_x: f64, click_y: f64) {
+    if let Some(last_hide) = *LAST_TRAY_HIDE.lock() {
+        if last_hide.elapsed() < Duration::from_millis(260) {
+            return;
+        }
     }
-
-    menu.append(&PredefinedMenuItem::separator(app)?)?;
-    menu.append(&open_item)?;
-    menu.append(&quit_item)?;
-    Ok(menu)
+    TRAY_MENU_HIDE_GEN.fetch_add(1, Ordering::SeqCst);
+    let app_clone = app.clone();
+    let _ = app.run_on_main_thread(move || {
+        if let Some(win) = ensure_tray_menu_window(&app_clone) {
+            if win.is_visible().unwrap_or(false) {
+                hide_tray_menu(&app_clone);
+                return;
+            }
+            *LAST_TRAY_ANCHOR.lock() = (click_x, click_y);
+            let scale = win.scale_factor().unwrap_or(1.0);
+            let current_h = win
+                .inner_size()
+                .map(|s| (s.height as f64) / scale)
+                .unwrap_or(TRAY_MENU_DEFAULT_HEIGHT)
+                .clamp(160.0, 520.0);
+            apply_win11_rounding(&win);
+            position_tray_menu(&win, click_x, click_y, current_h);
+            let _ = win.emit("tray-menu-opened", ());
+            let _ = win.show();
+            let _ = win.set_focus();
+        }
+    });
 }
 
 pub fn create_or_focus_main_window(app: &AppHandle) {
+    hide_tray_menu(app);
     if let Some(win) = app.get_webview_window("main") {
         apply_win11_rounding(&win);
+        apply_adaptive_taskbar_icon(&win);
         let _ = win.unminimize();
         let _ = win.show();
         let _ = win.set_focus();
@@ -207,6 +236,7 @@ pub fn create_or_focus_main_window(app: &AppHandle) {
         .build()
     {
         apply_win11_rounding(&win);
+        apply_adaptive_taskbar_icon(&win);
         let _ = win.set_focus();
     }
 }
@@ -224,15 +254,17 @@ pub fn refresh_tray_state(app: &AppHandle) {
                 "CharismaScroll — Paused"
             };
             let _ = tray.set_tooltip(Some(tooltip));
-            if let Ok(menu) = build_tray_menu(&app_clone, &state) {
-                let _ = tray.set_menu(Some(menu));
-            }
+        }
+        let has_ui_window = app_clone.get_webview_window("main").is_some()
+            || app_clone.get_webview_window(TRAY_MENU_LABEL).is_some();
+        if has_ui_window {
+            let snap = state.snapshot();
+            let _ = app_clone.emit("snapshot-updated", &snap);
         }
     });
 }
 
 pub fn setup_tray(app: &AppHandle, state: &SharedAppState) -> tauri::Result<TrayIcon<tauri::Wry>> {
-    let menu = build_tray_menu(app, state)?;
     let enabled = state.enabled.load(Ordering::Relaxed);
 
     TrayIconBuilder::with_id(TRAY_ID)
@@ -242,71 +274,24 @@ pub fn setup_tray(app: &AppHandle, state: &SharedAppState) -> tauri::Result<Tray
         } else {
             "CharismaScroll — Paused"
         })
-        .menu(&menu)
         .show_menu_on_left_click(false)
-        .on_tray_icon_event(|tray, event| {
-            if let TrayIconEvent::Click {
+        .on_tray_icon_event(|tray, event| match event {
+            TrayIconEvent::Click {
                 button: MouseButton::Left,
                 button_state: MouseButtonState::Up,
                 ..
-            } = event
-            {
+            } => {
                 create_or_focus_main_window(tray.app_handle());
             }
-        })
-        .on_menu_event(|app, event| {
-            let state = app.state::<SharedAppState>();
-            let id = event.id.as_ref();
-            match id {
-                "open" => create_or_focus_main_window(app),
-                "quit" => {
-                    state.should_exit.store(true, Ordering::Relaxed);
-                    app.exit(0);
-                }
-                "toggle" => {
-                    let mut next = state.settings.read().clone();
-                    next.enabled = !next.enabled;
-                    let _ = state.apply_settings_to_runtime(next, app);
-                }
-                "toggle_recent_app" => {
-                    if let Some(exe) = state.last_scrolled_exe.read().clone() {
-                        let mut next = state.settings.read().clone();
-                        if let Some(pos) = next
-                            .app_rules
-                            .iter()
-                            .position(|r| r.exe_name.eq_ignore_ascii_case(&exe))
-                        {
-                            if next.app_rules[pos].mode == AppRuleMode::Disabled {
-                                next.app_rules.remove(pos);
-                            } else {
-                                next.app_rules[pos].mode = AppRuleMode::Disabled;
-                            }
-                        } else {
-                            let display_name = exe
-                                .strip_suffix(".exe")
-                                .or_else(|| exe.strip_suffix(".EXE"))
-                                .unwrap_or(&exe)
-                                .to_string();
-                            next.app_rules.push(AppRule {
-                                exe_name: exe,
-                                display_name,
-                                mode: AppRuleMode::Disabled,
-                                profile: ScrollProfile::default(),
-                            });
-                        }
-                        let _ = state.apply_settings_to_runtime(next, app);
-                    }
-                }
-                p if p.starts_with("preset:") => {
-                    let preset_id = p.trim_start_matches("preset:");
-                    let mut next = state.settings.read().clone();
-                    next.active_preset = preset_id.to_string();
-                    next.global_profile = resolve_preset_profile(preset_id);
-                    let _ = state.apply_settings_to_runtime(next, app);
-                }
-                _ => {}
+            TrayIconEvent::Click {
+                button: MouseButton::Right,
+                button_state: MouseButtonState::Up,
+                position,
+                ..
+            } => {
+                toggle_tray_menu_popup(tray.app_handle(), position.x, position.y);
             }
-            let _ = app.emit("tray-action", id);
+            _ => {}
         })
         .build(app)
 }

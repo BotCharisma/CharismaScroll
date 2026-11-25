@@ -1,9 +1,15 @@
-use crate::app::commands::{self, SharedAppState};
-use crate::app::tray::{create_or_focus_main_window, refresh_tray_state, setup_tray};
+use crate::app::command_registry;
+use crate::app::commands::SharedAppState;
+use crate::app::tray::{
+    create_or_focus_main_window, hide_tray_menu, refresh_taskbar_icon, refresh_tray_state,
+    setup_tray, TRAY_MENU_LABEL,
+};
 use crate::config::AppSettings;
-use crate::engine::hook::{spawn_mouse_hook_thread, HookContext};
+use crate::engine::hook::{spawn_mouse_hook_thread, stop_mouse_hook_thread, HookContext};
 use crate::engine::physics::spawn_animator_thread;
-use crate::platform::spawn_hotkey_thread;
+use crate::platform::{
+    spawn_hotkey_thread, spawn_system_theme_watcher, stop_hotkey_thread, SingleInstanceGuard,
+};
 use crossbeam_channel::bounded;
 use parking_lot::RwLock;
 use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
@@ -12,6 +18,11 @@ use tauri::{Emitter, Manager, RunEvent, WindowEvent};
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
+    let Some(single_instance) = SingleInstanceGuard::acquire() else {
+        return;
+    };
+    let single_instance = Arc::new(single_instance);
+
     let start_minimized = std::env::args().any(|a| a == "--minimized");
     let initial_settings = AppSettings::load();
     let initial_enabled = initial_settings.enabled;
@@ -19,7 +30,7 @@ pub fn run() {
     let initial_fps = initial_settings.target_fps;
     let initial_hotkey = initial_settings.hotkey.clone();
 
-    let settings_arc = Arc::new(RwLock::new(initial_settings));
+    let settings_arc = Arc::new(RwLock::new(Arc::new(initial_settings)));
     let enabled_arc = Arc::new(AtomicBool::new(initial_enabled));
     let passthrough_arc = Arc::new(AtomicBool::new(initial_passthrough));
     let target_fps_arc = Arc::new(AtomicU32::new(initial_fps));
@@ -39,22 +50,21 @@ pub fn run() {
         should_exit: should_exit_arc.clone(),
     };
 
+    let setup_guard = Arc::clone(&single_instance);
     let app = tauri::Builder::default()
+        .plugin(tauri_plugin_updater::Builder::new().build())
         .manage(shared_state)
-        .invoke_handler(tauri::generate_handler![
-            commands::get_app_snapshot,
-            commands::update_settings,
-            commands::apply_preset,
-            commands::save_custom_preset,
-            commands::delete_custom_preset,
-            commands::open_storage_folder,
-            commands::toggle_engine,
-            commands::get_running_apps,
-            commands::elevate_to_admin,
-            commands::set_telemetry_active,
-        ])
+        .invoke_handler(command_registry::invoke_handler())
         .setup(move |app| {
             let handle = app.handle().clone();
+
+            let focus_handle = handle.clone();
+            setup_guard.spawn_focus_listener(move || {
+                let h = focus_handle.clone();
+                let _ = focus_handle.run_on_main_thread(move || {
+                    create_or_focus_main_window(&h);
+                });
+            });
 
             if start_minimized {
                 if let Some(win) = app.get_webview_window("main") {
@@ -98,9 +108,15 @@ pub fn run() {
             let hotkey_handle = handle.clone();
             spawn_hotkey_thread(initial_hotkey, move || {
                 let state = hotkey_handle.state::<SharedAppState>();
-                let mut next = state.settings.read().clone();
+                let mut next = (**state.settings.read()).clone();
                 next.enabled = !next.enabled;
                 let _ = state.apply_settings_to_runtime(next, &hotkey_handle);
+            });
+
+            // Watch Windows Taskbar Dark/Light theme to live-swap adaptive taskbar icon
+            let theme_handle = handle.clone();
+            spawn_system_theme_watcher(move |_is_light| {
+                refresh_taskbar_icon(&theme_handle);
             });
 
             Ok(())
@@ -108,22 +124,43 @@ pub fn run() {
         .build(tauri::generate_context!())
         .expect("Failed to build CharismaScroll Tauri application");
 
-    app.run(move |app_handle, event| match event {
-        RunEvent::WindowEvent {
-            label,
-            event: WindowEvent::Destroyed,
-            ..
-        } if label == "main" => {
-            // WebView2 process released completely; pause UI telemetry to keep ~5-8MB idle RAM
-            let state = app_handle.state::<SharedAppState>();
-            state.telemetry_active.store(false, Ordering::Relaxed);
-        }
-        RunEvent::ExitRequested { api, .. } => {
-            let state = app_handle.state::<SharedAppState>();
-            if !state.should_exit.load(Ordering::Relaxed) {
-                api.prevent_exit();
+    app.run(move |app_handle, event| {
+        let _keep_guard = &single_instance;
+        match event {
+            RunEvent::WindowEvent {
+                label,
+                event: WindowEvent::Destroyed,
+                ..
+            } if label == "main" => {
+                // WebView2 process released completely; pause UI telemetry to keep ~8-15MB idle RAM
+                let state = app_handle.state::<SharedAppState>();
+                state.telemetry_active.store(false, Ordering::Relaxed);
             }
+            RunEvent::WindowEvent {
+                label,
+                event: WindowEvent::ThemeChanged(_),
+                ..
+            } if label == "main" => {
+                refresh_taskbar_icon(app_handle);
+            }
+            RunEvent::WindowEvent {
+                label,
+                event: WindowEvent::Focused(false),
+                ..
+            } if label == TRAY_MENU_LABEL => {
+                hide_tray_menu(app_handle);
+            }
+            RunEvent::ExitRequested { api, .. } => {
+                let state = app_handle.state::<SharedAppState>();
+                if !state.should_exit.load(Ordering::Relaxed) {
+                    api.prevent_exit();
+                }
+            }
+            RunEvent::Exit => {
+                stop_mouse_hook_thread();
+                stop_hotkey_thread();
+            }
+            _ => {}
         }
-        _ => {}
     });
 }

@@ -1,6 +1,13 @@
 import { useEffect, useMemo, useState } from "react";
-import { Cpu, FolderOpen, Keyboard, Power, ShieldCheck } from "lucide-react";
-import type { AppSettings } from "../lib/tauri";
+import { Cpu, Download, FolderOpen, Keyboard, Power, RefreshCw, ShieldCheck } from "lucide-react";
+import {
+  checkForUpdate,
+  installUpdate,
+  subscribeUpdateProgress,
+  type AppSettings,
+  type UpdateInfo,
+  type UpdateProgressPayload,
+} from "../lib/tauri";
 import { StageDropdown, type DropdownOption } from "./StageDropdown";
 import { Tooltip } from "./Tooltip";
 
@@ -24,6 +31,53 @@ export function SystemTab({
   onOpenStorageFolder,
 }: SystemTabProps) {
   const [recordingHotkey, setRecordingHotkey] = useState(false);
+  const [updateState, setUpdateState] = useState<
+    "idle" | "checking" | "available" | "up-to-date" | "downloading" | "installing" | "error"
+  >("idle");
+  const [updateInfo, setUpdateInfo] = useState<UpdateInfo | null>(null);
+  const [updateProgress, setUpdateProgress] = useState<UpdateProgressPayload | null>(null);
+  const [updateError, setUpdateError] = useState<string | null>(null);
+
+  useEffect(() => {
+    let unlisten: (() => void) | undefined;
+    void subscribeUpdateProgress((prog) => {
+      setUpdateProgress(prog);
+      setUpdateState(prog.stage === "installing" ? "installing" : "downloading");
+    }).then((fn) => {
+      unlisten = fn;
+    });
+    return () => unlisten?.();
+  }, []);
+
+  const handleCheckUpdate = async () => {
+    setUpdateState("checking");
+    setUpdateError(null);
+    try {
+      const info = await checkForUpdate();
+      setUpdateInfo(info);
+      setUpdateState(info.available ? "available" : "up-to-date");
+    } catch (err) {
+      setUpdateError(err instanceof Error ? err.message : String(err));
+      setUpdateState("error");
+    }
+  };
+
+  const handleInstallUpdate = async () => {
+    setUpdateState("downloading");
+    setUpdateProgress({ downloaded: 0, total: null, stage: "downloading" });
+    setUpdateError(null);
+    try {
+      await installUpdate();
+    } catch (err) {
+      setUpdateError(err instanceof Error ? err.message : String(err));
+      setUpdateState("error");
+    }
+  };
+
+  const downloadPercent =
+    updateProgress?.total && updateProgress.total > 0
+      ? Math.min(100, Math.round((updateProgress.downloaded / updateProgress.total) * 100))
+      : null;
 
   useEffect(() => {
     if (!recordingHotkey) return;
@@ -96,7 +150,7 @@ export function SystemTab({
         </div>
       </div>
 
-      <div className="spec-rows">
+      <div className="spec-rows spec-rows-system">
         {/* Row 1: Privilege (UIPI) */}
         <div className="spec-row">
           <div className="spec-row-main">
@@ -252,6 +306,80 @@ export function SystemTab({
                   onUpdateSettings({ ...settings, targetFps: Number(val) })
                 }
               />
+            </div>
+          </div>
+        </div>
+
+        {/* Row 5: App Updates */}
+        <div className="spec-row">
+          <div className="spec-row-main">
+            <div className="spec-label-btn">
+              <span className="spec-glyph" aria-hidden="true">
+                <Download size={15} strokeWidth={1.5} />
+              </span>
+              <span>App updates</span>
+            </div>
+
+            <div className="spec-controls">
+              {updateState === "idle" && (
+                <span className="update-status-text mono-num">Beta v0.3.0</span>
+              )}
+              {updateState === "checking" && (
+                <span className="update-status-text">Checking…</span>
+              )}
+              {updateState === "up-to-date" && (
+                <span className="update-status-text is-positive">Up to date</span>
+              )}
+              {updateState === "downloading" && (
+                <span className="update-status-text is-signal mono-num">
+                  {downloadPercent !== null ? `Downloading ${downloadPercent}%` : "Downloading…"}
+                </span>
+              )}
+              {updateState === "installing" && (
+                <span className="update-status-text is-signal">Installing…</span>
+              )}
+              {updateState === "error" && (
+                <Tooltip label={updateError || "Could not reach GitHub Releases"} placement="top">
+                  <span className="update-status-text is-danger">Check failed</span>
+                </Tooltip>
+              )}
+
+              {updateState === "available" && updateInfo?.version ? (
+                <Tooltip
+                  label={updateInfo.body?.trim() || `Update to v${updateInfo.version}`}
+                  placement="top-end"
+                >
+                  <button
+                    type="button"
+                    className="outline-pill-btn update-install-btn"
+                    onClick={handleInstallUpdate}
+                  >
+                    <Download size={13} strokeWidth={1.7} aria-hidden="true" />
+                    <span className="mono-num">Install v{updateInfo.version}</span>
+                  </button>
+                </Tooltip>
+              ) : (
+                <Tooltip label="Check GitHub Releases for a newer version" placement="top-end">
+                  <button
+                    type="button"
+                    className="outline-pill-btn"
+                    disabled={
+                      updateState === "checking" ||
+                      updateState === "downloading" ||
+                      updateState === "installing"
+                    }
+                    onClick={handleCheckUpdate}
+                  >
+                    <RefreshCw
+                      size={13}
+                      strokeWidth={1.6}
+                      className={updateState === "checking" ? "is-spinning" : undefined}
+                      aria-hidden="true"
+                    />
+                    <span>Check</span>
+                  </button>
+                </Tooltip>
+              )}
             </div>
           </div>
         </div>

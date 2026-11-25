@@ -1,6 +1,5 @@
 use crate::config::{EasingCurve, ScrollProfile};
 use crossbeam_channel::Receiver;
-use parking_lot::RwLock;
 use serde::Serialize;
 use std::collections::VecDeque;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -330,7 +329,7 @@ pub fn spawn_animator_thread<F>(
             let mut acc = PulseAccumulator::new();
             let timer = HighResTimer::new();
             let mut current_hz: u32 = 60;
-            let active_exe = Arc::new(RwLock::new(String::new()));
+            let mut active_exe = String::new();
             let mut last_step_sec = origin.elapsed().as_secs_f64();
             let mut last_telemetry_sec = 0.0_f64;
 
@@ -347,7 +346,7 @@ pub fn spawn_animator_thread<F>(
                             let now_sec = origin.elapsed().as_secs_f64();
                             last_step_sec = now_sec;
                             current_hz = resolve_hz(monitor_hz, target_fps.load(Ordering::Relaxed));
-                            *active_exe.write() = exe_name;
+                            active_exe = exe_name;
                             acc.push_impulse(raw_delta, axis, &profile, now_sec);
                         }
                         Ok(EngineCommand::CancelAll) => {
@@ -369,7 +368,7 @@ pub fn spawn_animator_thread<F>(
                         } => {
                             let now_sec = origin.elapsed().as_secs_f64();
                             current_hz = resolve_hz(monitor_hz, target_fps.load(Ordering::Relaxed));
-                            *active_exe.write() = exe_name;
+                            active_exe = exe_name;
                             acc.push_impulse(raw_delta, axis, &profile, now_sec);
                         }
                         EngineCommand::CancelAll => {
@@ -403,13 +402,12 @@ pub fn spawn_animator_thread<F>(
                     && (now_sec - last_telemetry_sec >= 0.032 || acc.is_idle())
                 {
                     last_telemetry_sec = now_sec;
-                    let exe = active_exe.read().clone();
                     emit_telemetry(ScrollTelemetry {
                         progress,
                         velocity_px_per_sec: velocity_px,
                         axis,
                         monitor_hz: current_hz,
-                        active_exe: exe,
+                        active_exe: active_exe.clone(),
                     });
                 }
 

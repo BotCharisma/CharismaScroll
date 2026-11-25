@@ -16,19 +16,166 @@ interface TestPadDrawerProps {
   telemetry: ScrollTelemetry | null;
 }
 
+const PROSE_SECTIONS = [
+  {
+    id: "01",
+    heading: "Testing stopping precision",
+    paragraphs: [
+      "Roll a single detent or flick rapidly inside this card to feel how impulses stack without losing crisp line control.",
+      "Pressing Ctrl mid-glide cuts remaining momentum immediately so browser zoom never overshoots.",
+    ],
+  },
+  {
+    id: "02",
+    heading: "Single-notch micro stepping",
+    paragraphs: [
+      "Give the wheel one gentle notch and watch where the baseline settles. A well-tuned step size moves two to four lines without feeling abrupt or sluggish.",
+      "If text feels like it drifts past the paragraph you intended to read, trim Glide time by 40 to 80 milliseconds or switch deceleration to OutQuart.",
+    ],
+  },
+  {
+    id: "03",
+    heading: "Rapid flick & momentum boost",
+    paragraphs: [
+      "Flick the wheel three or four times in quick succession to trigger velocity stacking. Max boost multiplies consecutive detents so long documents fly past effortlessly.",
+      "Notice how the curve starts briskly and tapers softly into silence instead of slamming into a sudden stop.",
+    ],
+  },
+  {
+    id: "04",
+    heading: "High-refresh cadence (120–240 Hz)",
+    paragraphs: [
+      "Every frame emits sub-unit wheel increments and carries fractional remainders forward so zero travel distance is ever dropped across monitor refresh rates.",
+      "Keep your eye on the orange curve trace above as you scroll: each new pulse blends seamlessly into the active tail.",
+    ],
+  },
+  {
+    id: "05",
+    heading: "Direction reversal & brake feel",
+    paragraphs: [
+      "Scroll quickly downward, then immediately flick upward one notch. The physics engine cancels opposing momentum on contact so reversing direction always feels instant.",
+      "This prevents the rubbery lag that plagues naive spring-only smooth scrollers when skimming long articles or design specs.",
+    ],
+  },
+  {
+    id: "06",
+    heading: "Long-form reading comfort",
+    paragraphs: [
+      "Try reading at a steady rhythm while nudging the wheel every few seconds. Ideal reading motion keeps your eyes anchored on the next line without hunting for where the paragraph jumped.",
+      "Trackpad Glide favors longer, softer tails for relaxed reading; Snappy Code tightens both step and decay for rapid diff scanning.",
+    ],
+  },
+  {
+    id: "07",
+    heading: "Per-app rules & fullscreen guard",
+    paragraphs: [
+      "Apps like 3D viewports, CAD tools, or competitive games often rely on raw discrete wheel ticks. Add them under Apps to bypass smoothing automatically.",
+      "When Game Mode is enabled, fullscreen windows drop straight back to native hardware wheel events with zero overhead.",
+    ],
+  },
+  {
+    id: "08",
+    heading: "End of runway marker",
+    paragraphs: [
+      "You reached the bottom of the prose runway. Flick back to the top in one smooth motion to compare upward and downward feel.",
+      "Close this drawer anytime from the corner square button to return to the calm four-row stage.",
+    ],
+  },
+];
+
 const CODE_LINES = [
-  "pub fn step(&mut self, now: f64) -> i32 {",
-  "    let mut delta = 0.0;",
-  "    for pulse in &mut self.pulses {",
-  "        let p = ((now - pulse.start) / pulse.dur).clamp(0.0, 1.0);",
-  "        let y = pulse.total * pulse.easing.evaluate(p);",
-  "        delta += y - pulse.exported;",
-  "        pulse.exported = y;",
+  "// CharismaScroll — Smooth Wheel Physics Kernel (sample buffer)",
+  "use std::collections::VecDeque;",
+  "",
+  "#[derive(Debug, Clone, Copy)]",
+  "pub enum EasingCurve {",
+  "    OutCubic,",
+  "    OutQuart,",
+  "    OutQuint,",
+  "    OutExpo,",
+  "}",
+  "",
+  "impl EasingCurve {",
+  "    pub fn evaluate(self, t: f64) -> f64 {",
+  "        let x = t.clamp(0.0, 1.0);",
+  "        match self {",
+  "            Self::OutCubic => 1.0 - (1.0 - x).powi(3),",
+  "            Self::OutQuart => 1.0 - (1.0 - x).powi(4),",
+  "            Self::OutQuint => 1.0 - (1.0 - x).powi(5),",
+  "            Self::OutExpo => if x >= 1.0 { 1.0 } else { 1.0 - 2.0_f64.powf(-10.0 * x) },",
+  "        }",
   "    }",
-  "    let exact = delta + self.remainder;",
-  "    let send = exact.round() as i32;",
-  "    self.remainder = exact - (send as f64);",
-  "    send",
+  "}",
+  "",
+  "#[derive(Debug, Clone)]",
+  "pub struct ScrollPulse {",
+  "    pub total: f64,",
+  "    pub exported: f64,",
+  "    pub start_ms: f64,",
+  "    pub dur_ms: f64,",
+  "    pub easing: EasingCurve,",
+  "}",
+  "",
+  "pub struct PhysicsEngine {",
+  "    pulses: VecDeque<ScrollPulse>,",
+  "    remainder: f64,",
+  "    last_notch_ms: f64,",
+  "    streak: u32,",
+  "}",
+  "",
+  "impl PhysicsEngine {",
+  "    pub fn new() -> Self {",
+  "        Self {",
+  "            pulses: VecDeque::with_capacity(32),",
+  "            remainder: 0.0,",
+  "            last_notch_ms: 0.0,",
+  "            streak: 0,",
+  "        }",
+  "    }",
+  "",
+  "    pub fn push_detent(&mut self, dir: f64, step_px: f64, dur_ms: f64, max_boost: f64, now: f64) {",
+  "        // Instant brake if user reverses scroll direction mid-glide",
+  "        if self.pulses.back().is_some_and(|p| p.total.signum() != dir.signum()) {",
+  "            self.pulses.clear();",
+  "            self.remainder = 0.0;",
+  "            self.streak = 0;",
+  "        }",
+  "",
+  "        let gap = now - self.last_notch_ms;",
+  "        self.last_notch_ms = now;",
+  "        self.streak = if gap < 140.0 { (self.streak + 1).min(12) } else { 0 };",
+  "",
+  "        let boost = (1.0 + (self.streak as f64) * 0.24).min(max_boost);",
+  "        self.pulses.push_back(ScrollPulse {",
+  "            total: dir * step_px * boost,",
+  "            exported: 0.0,",
+  "            start_ms: now,",
+  "            dur_ms: dur_ms.max(40.0),",
+  "            easing: EasingCurve::OutQuart,",
+  "        });",
+  "    }",
+  "",
+  "    pub fn step(&mut self, now: f64) -> i32 {",
+  "        let mut delta = 0.0;",
+  "        for pulse in &mut self.pulses {",
+  "            let p = ((now - pulse.start_ms) / pulse.dur_ms).clamp(0.0, 1.0);",
+  "            let y = pulse.total * pulse.easing.evaluate(p);",
+  "            delta += y - pulse.exported;",
+  "            pulse.exported = y;",
+  "        }",
+  "        self.pulses.retain(|p| now - p.start_ms < p.dur_ms);",
+  "",
+  "        let exact = delta + self.remainder;",
+  "        let send = exact.round() as i32;",
+  "        self.remainder = exact - (send as f64);",
+  "        send",
+  "    }",
+  "",
+  "    pub fn cancel_for_zoom(&mut self) {",
+  "        self.pulses.clear();",
+  "        self.remainder = 0.0;",
+  "        self.streak = 0;",
+  "    }",
   "}",
 ];
 
@@ -37,6 +184,22 @@ const STRIP_CARDS = [
   { id: "02", title: "Sub-unit Carry", desc: "Zero fractional loss at 240\u00A0Hz" },
   { id: "03", title: "Zoom Guard", desc: "Instant glide cut on Ctrl press" },
   { id: "04", title: "Touchpad Pass", desc: "Native precision gestures preserved" },
+  { id: "05", title: "OutQuart Curve", desc: "Brisk launch, velvety settle" },
+  { id: "06", title: "Instant Brake", desc: "Zero lag when flipping direction" },
+  { id: "07", title: "Impulse Stack", desc: "Consecutive flicks blend cleanly" },
+  { id: "08", title: "Velocity Boost", desc: "Adaptive acceleration for long feeds" },
+  { id: "09", title: "Shift + Wheel", desc: "Horizontal glide across timelines" },
+  { id: "10", title: "App Profiles", desc: "Per-process bypass or custom tune" },
+  { id: "11", title: "Game Guard", desc: "Auto-pause inside fullscreen games" },
+  { id: "12", title: "Tray Quick-Toggle", desc: "One click or hotkey to pause" },
+  { id: "13", title: "Zero Jitter", desc: "Fixed-step high-resolution timer" },
+  { id: "14", title: "Multi-Monitor", desc: "Matches display refresh cadence" },
+  { id: "15", title: "DPI Aware", desc: "Consistent distance on 4K & 1080p" },
+  { id: "16", title: "Low Footprint", desc: "Native Rust core, tiny memory use" },
+  { id: "17", title: "Custom Presets", desc: "Saved cleanly in your Documents" },
+  { id: "18", title: "Admin Elevation", desc: "Scrolls elevated tools smoothly" },
+  { id: "19", title: "Telemetry Feed", desc: "Live curve & velocity feedback" },
+  { id: "20", title: "Runway End", desc: "Flick left to glide back to 01" },
 ];
 
 export function TestPadDrawer({
@@ -92,6 +255,10 @@ export function TestPadDrawer({
     const onWheel = (e: WheelEvent) => {
       if (isTauriRuntime() || !enabled) {
         if (!paused) setLocalProgress(0.2);
+        if (mode === "strip" && !e.ctrlKey && !e.altKey && Math.abs(e.deltaY) > Math.abs(e.deltaX)) {
+          e.preventDefault();
+          box.scrollLeft += e.deltaY;
+        }
         return;
       }
       if (e.ctrlKey || e.altKey) return;
@@ -251,19 +418,17 @@ export function TestPadDrawer({
           <div ref={surfaceRef} className="testpad-surface" tabIndex={0}>
             {mode === "essay" && (
               <article className="prose-test">
-                <h3>Testing stopping precision</h3>
-                <p>
-                  Roll a single detent or flick rapidly inside this card to feel how impulses
-                  stack without losing crisp line control.
-                </p>
-                <p>
-                  Pressing Ctrl mid-glide cuts remaining momentum immediately so browser zoom
-                  never overshoots.
-                </p>
-                <p>
-                  Close this drawer anytime from the corner square button to return to the calm
-                  four-row stage.
-                </p>
+                {PROSE_SECTIONS.map((sec) => (
+                  <section key={sec.id} className="prose-section">
+                    <h3>
+                      <span className="prose-idx mono-num">{sec.id}</span>
+                      {sec.heading}
+                    </h3>
+                    {sec.paragraphs.map((text, idx) => (
+                      <p key={idx}>{text}</p>
+                    ))}
+                  </section>
+                ))}
               </article>
             )}
 

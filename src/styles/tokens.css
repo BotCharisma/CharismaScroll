@@ -4,8 +4,8 @@
 :root {
   color-scheme: dark;
 
-  /* Typefaces (Neue Montreal neo-grotesk proportions via local Inter Variable) */
-  --font-sans: "Inter Variable", "Segoe UI Variable Display", "Segoe UI", system-ui, sans-serif;
+  /* Typefaces (Lexend Variable via local @fontsource-variable/lexend) */
+  --font-sans: "Lexend Variable", "Lexend", "Segoe UI Variable Display", "Segoe UI", system-ui, sans-serif;
   --font-mono: "Cascadia Mono", Consolas, ui-monospace, monospace;
 
   /* Exact Arounda Brand Sheet Palette (#161316, #453027, #FF6D29, #BABABA, warm #FFFDFA white) */

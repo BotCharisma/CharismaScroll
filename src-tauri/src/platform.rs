@@ -5,16 +5,21 @@ use std::path::Path;
 use std::process::Command;
 use std::sync::atomic::{AtomicU32, Ordering};
 use windows::core::{w, PCWSTR};
-use windows::Win32::Foundation::{BOOL, HWND, LPARAM, RECT, WPARAM};
+use windows::Win32::Foundation::{
+    CloseHandle, GetLastError, BOOL, ERROR_ALREADY_EXISTS, HANDLE, HWND, LPARAM, POINT, RECT,
+    WAIT_OBJECT_0, WPARAM,
+};
 use windows::Win32::Graphics::Gdi::{
-    EnumDisplaySettingsW, GetMonitorInfoW, MonitorFromWindow, DEVMODEW, ENUM_CURRENT_SETTINGS,
-    MONITORINFO, MONITORINFOEXW, MONITOR_DEFAULTTOPRIMARY,
+    EnumDisplaySettingsW, GetMonitorInfoW, MonitorFromPoint, MonitorFromWindow, DEVMODEW,
+    ENUM_CURRENT_SETTINGS, MONITORINFO, MONITORINFOEXW, MONITOR_DEFAULTTOPRIMARY,
+    MONITOR_DEFAULTTONEAREST,
 };
 use windows::Win32::Security::{GetTokenInformation, TokenElevation, TOKEN_ELEVATION, TOKEN_QUERY};
 use windows::Win32::System::ProcessStatus::GetModuleFileNameExW;
 use windows::Win32::System::Threading::{
-    GetCurrentProcess, GetCurrentThreadId, OpenProcess, OpenProcessToken, PROCESS_QUERY_INFORMATION,
-    PROCESS_VM_READ,
+    CreateEventW, CreateMutexW, GetCurrentProcess, GetCurrentThreadId, OpenEventW, OpenProcess,
+    OpenProcessToken, SetEvent, WaitForSingleObject, EVENT_MODIFY_STATE, INFINITE,
+    PROCESS_QUERY_INFORMATION, PROCESS_VM_READ,
 };
 use windows::Win32::UI::Input::KeyboardAndMouse::{
     RegisterHotKey, UnregisterHotKey, HOT_KEY_MODIFIERS, MOD_ALT, MOD_CONTROL, MOD_NOREPEAT,
@@ -24,7 +29,7 @@ use windows::Win32::UI::Shell::ShellExecuteW;
 use windows::Win32::UI::WindowsAndMessaging::{
     EnumWindows, GetMessageW, GetWindowRect, GetWindowTextLengthW, GetWindowTextW,
     GetWindowThreadProcessId, IsWindowVisible, PostThreadMessageW, MSG, SW_SHOWNORMAL, WM_APP,
-    WM_HOTKEY,
+    WM_HOTKEY, WM_QUIT,
 };
 
 const CREATE_NO_WINDOW: u32 = 0x0800_0000;
@@ -413,4 +418,194 @@ where
             let _ = UnregisterHotKey(None, HOTKEY_ID);
         })
         .expect("Failed to spawn hotkey thread");
+}
+
+pub fn stop_hotkey_thread() {
+    let tid = HOTKEY_THREAD_ID.swap(0, Ordering::Relaxed);
+    if tid != 0 {
+        unsafe {
+            let _ = PostThreadMessageW(tid, WM_QUIT, WPARAM(0), LPARAM(0));
+        }
+    }
+}
+
+/// Ensures only one CharismaScroll instance runs per user session; a second launch wakes the existing instance.
+pub struct SingleInstanceGuard {
+    mutex: HANDLE,
+    show_event: HANDLE,
+}
+
+unsafe impl Send for SingleInstanceGuard {}
+unsafe impl Sync for SingleInstanceGuard {}
+
+impl SingleInstanceGuard {
+    pub fn acquire() -> Option<Self> {
+        unsafe {
+            let Ok(mutex) = CreateMutexW(None, false, w!("Local\\CharismaScroll_SingleInstance_v1")) else {
+                return None;
+            };
+            if GetLastError() == ERROR_ALREADY_EXISTS {
+                if let Ok(evt) = OpenEventW(
+                    EVENT_MODIFY_STATE,
+                    false,
+                    w!("Local\\CharismaScroll_ShowEvent_v1"),
+                ) {
+                    let _ = SetEvent(evt);
+                    let _ = CloseHandle(evt);
+                }
+                let _ = CloseHandle(mutex);
+                return None;
+            }
+            let Ok(show_event) = CreateEventW(None, false, false, w!("Local\\CharismaScroll_ShowEvent_v1")) else {
+                let _ = CloseHandle(mutex);
+                return None;
+            };
+            Some(Self { mutex, show_event })
+        }
+    }
+
+    pub fn spawn_focus_listener<F>(&self, on_focus: F)
+    where
+        F: Fn() + Send + 'static,
+    {
+        let event_raw = self.show_event.0 as usize;
+        let _ = std::thread::Builder::new()
+            .name("charisma-single-instance".to_string())
+            .spawn(move || unsafe {
+                let handle = HANDLE(event_raw as *mut std::ffi::c_void);
+                while WaitForSingleObject(handle, INFINITE) == WAIT_OBJECT_0 {
+                    on_focus();
+                }
+            });
+    }
+}
+
+impl Drop for SingleInstanceGuard {
+    fn drop(&mut self) {
+        unsafe {
+            if !self.show_event.is_invalid() {
+                let _ = CloseHandle(self.show_event);
+            }
+            if !self.mutex.is_invalid() {
+                let _ = CloseHandle(self.mutex);
+            }
+        }
+    }
+}
+
+#[link(name = "advapi32")]
+extern "system" {
+    fn RegGetValueW(
+        hkey: isize,
+        lp_sub_key: *const u16,
+        lp_value: *const u16,
+        dw_flags: u32,
+        pdw_type: *mut u32,
+        pv_data: *mut std::ffi::c_void,
+        pcb_data: *mut u32,
+    ) -> i32;
+    fn RegOpenKeyExW(
+        hkey: isize,
+        lp_sub_key: *const u16,
+        ul_options: u32,
+        sam_desired: u32,
+        phk_result: *mut isize,
+    ) -> i32;
+    fn RegNotifyChangeKeyValue(
+        hkey: isize,
+        b_watch_subtree: i32,
+        dw_notify_filter: u32,
+        h_event: isize,
+        f_asynchronous: i32,
+    ) -> i32;
+    fn RegCloseKey(hkey: isize) -> i32;
+}
+
+const HKEY_CURRENT_USER: isize = -2147483647; // 0x8000_0001
+const RRF_RT_REG_DWORD: u32 = 0x0000_0010;
+const KEY_NOTIFY: u32 = 0x0010;
+const REG_NOTIFY_CHANGE_LAST_SET: u32 = 0x0000_0004;
+
+fn to_wide_null(s: &str) -> Vec<u16> {
+    s.encode_utf16().chain(std::iter::once(0)).collect()
+}
+
+/// Returns `true` when Windows taskbar / system chrome uses Light theme (`SystemUsesLightTheme == 1`),
+/// or `false` when Windows taskbar uses Dark theme (`SystemUsesLightTheme == 0`).
+pub fn is_windows_system_light_theme() -> bool {
+    let subkey = to_wide_null(r"Software\Microsoft\Windows\CurrentVersion\Themes\Personalize");
+    let value = to_wide_null("SystemUsesLightTheme");
+    let mut data: u32 = 0;
+    let mut data_size = std::mem::size_of::<u32>() as u32;
+    let status = unsafe {
+        RegGetValueW(
+            HKEY_CURRENT_USER,
+            subkey.as_ptr(),
+            value.as_ptr(),
+            RRF_RT_REG_DWORD,
+            std::ptr::null_mut(),
+            (&mut data as *mut u32).cast(),
+            &mut data_size,
+        )
+    };
+    status == 0 && data != 0
+}
+
+/// Zero-CPU blocking registry watcher for Windows Dark/Light taskbar theme changes.
+pub fn spawn_system_theme_watcher<F>(on_change: F)
+where
+    F: Fn(bool) + Send + 'static,
+{
+    let _ = std::thread::Builder::new()
+        .name("charisma-theme-watch".to_string())
+        .spawn(move || {
+            let subkey =
+                to_wide_null(r"Software\Microsoft\Windows\CurrentVersion\Themes\Personalize");
+            let mut hkey: isize = 0;
+            let open_res = unsafe {
+                RegOpenKeyExW(
+                    HKEY_CURRENT_USER,
+                    subkey.as_ptr(),
+                    0,
+                    KEY_NOTIFY,
+                    &mut hkey,
+                )
+            };
+            if open_res != 0 || hkey == 0 {
+                return;
+            }
+            let mut last_light = is_windows_system_light_theme();
+            loop {
+                let wait_res = unsafe {
+                    RegNotifyChangeKeyValue(hkey, 0, REG_NOTIFY_CHANGE_LAST_SET, 0, 0)
+                };
+                if wait_res != 0 {
+                    break;
+                }
+                let next_light = is_windows_system_light_theme();
+                if next_light != last_light {
+                    last_light = next_light;
+                    on_change(next_light);
+                }
+            }
+            unsafe {
+                RegCloseKey(hkey);
+            }
+        });
+}
+
+/// Returns `(left, top, right, bottom)` of the work area (excluding taskbar) for the monitor containing `(x, y)`.
+pub fn monitor_work_area_at_point(x: i32, y: i32) -> (i32, i32, i32, i32) {
+    unsafe {
+        let hmon = MonitorFromPoint(POINT { x, y }, MONITOR_DEFAULTTONEAREST);
+        let mut info = MONITORINFO {
+            cbSize: std::mem::size_of::<MONITORINFO>() as u32,
+            ..Default::default()
+        };
+        if GetMonitorInfoW(hmon, &mut info).as_bool() {
+            let w = info.rcWork;
+            return (w.left, w.top, w.right, w.bottom);
+        }
+    }
+    (0, 0, 1920, 1040)
 }

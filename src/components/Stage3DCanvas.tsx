@@ -167,11 +167,13 @@ void main() {
     if (t > 5.0) break;
   }
 
-  // Soft studio contact shadow beneath sculpture
-  float shadowMask = exp(-length(uv - vec2(0.04, -0.46)) * 3.4) * 0.34;
+  // Soft studio contact shadow beneath sculpture (fades cleanly to 0 before canvas edges)
+  float shadowDist = length(uv - vec2(0.04, -0.46));
+  float shadowMask = exp(-shadowDist * 3.4) * smoothstep(0.92, 0.32, shadowDist) * 0.34;
 
   if (!hit) {
-    outColor = vec4(vec3(0.07, 0.05, 0.06), shadowMask);
+    // Premultiplied alpha so Chromium/WebView2 composites transparent regions without a milky box
+    outColor = vec4(vec3(0.05, 0.03, 0.04) * shadowMask, shadowMask);
     return;
   }
 
@@ -309,7 +311,7 @@ export function Stage3DCanvas({ presetId, telemetry }: Stage3DCanvasProps) {
     const gl = canvas.getContext("webgl2", {
       alpha: true,
       antialias: true,
-      premultipliedAlpha: false,
+      premultipliedAlpha: true,
     });
 
     let prog: WebGLProgram | null = null;

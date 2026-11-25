@@ -1,7 +1,7 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
   "productName": "CharismaScroll",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "identifier": "com.charismascroll.studio",
   "build": {
     "beforeDevCommand": "npm run dev",
@@ -29,11 +29,30 @@
   },
   "bundle": {
     "active": true,
-    "targets": "all",
+    "targets": ["msi", "nsis"],
+    "createUpdaterArtifacts": true,
+    "publisher": "CharismaScroll",
+    "shortDescription": "System-wide smooth mouse wheel physics studio for Windows",
+    "copyright": "Copyright © 2026 CharismaScroll",
     "icon": [
       "icons/32x32.png",
       "icons/128x128.png",
       "icons/icon.ico"
-    ]
+    ],
+    "windows": {
+      "nsis": {
+        "installMode": "both",
+        "installerIcon": "icons/icon.ico",
+        "displayLanguageSelector": false
+      }
+    }
+  },
+  "plugins": {
+    "updater": {
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IEQ1NzBEQTA2QTlDQkFCOEYKUldTUHE4dXBCdHB3MVh4QVNWNi9pTDE3dXV3Q2F0eU5aaDZjRHdNSnQydnJOTnF1dkxLdmt2TzUK",
+      "endpoints": [
+        "https://github.com/BotCharisma/CharismaScroll/releases/latest/download/latest.json"
+      ]
+    }
   }
 }
