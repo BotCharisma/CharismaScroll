@@ -2,15 +2,18 @@ import { useEffect, useState } from "react";
 import { Layers, Shield, Sliders } from "lucide-react";
 import {
   PRESET_STAGE_META,
+  type CustomPreset,
   type PresetId,
   type ScrollTelemetry,
 } from "../lib/tauri";
 import { Stage3DCanvas } from "./Stage3DCanvas";
+import { Tooltip } from "./Tooltip";
 
 export type StageSection = "motion" | "apps" | "system";
 
 interface StageLeftProps {
   activePreset: string;
+  customPresets: CustomPreset[];
   activeSection: StageSection;
   onSelectSection: (section: StageSection) => void;
   telemetry: ScrollTelemetry | null;
@@ -43,12 +46,26 @@ const STAGE_GRADIENTS: Record<PresetId, { top: string; mid: string; low: string;
   },
 };
 
+function splitDisplayTitle(name: string): { line1: string; line2: string } {
+  const parts = name.trim().split(/\s+/).filter(Boolean);
+  if (parts.length <= 1) {
+    return { line1: parts[0] || "Custom", line2: "preset" };
+  }
+  return {
+    line1: parts[0],
+    line2: parts.slice(1).join(" "),
+  };
+}
+
 export function StageLeft({
   activePreset,
+  customPresets,
   activeSection,
   onSelectSection,
   telemetry,
 }: StageLeftProps) {
+  const matchedCustom = customPresets.find((cp) => cp.id === activePreset);
+
   const resolvedPreset: PresetId =
     activePreset === "macbook" ||
     activePreset === "coding" ||
@@ -57,8 +74,12 @@ export function StageLeft({
       ? activePreset
       : "classic";
 
-  const meta =
-    activePreset === "custom"
+  const meta = matchedCustom
+    ? {
+        ...splitDisplayTitle(matchedCustom.name),
+        summary: "Saved custom preset in Documents",
+      }
+    : activePreset === "custom"
       ? { line1: "Custom", line2: "tune", summary: "Hand-tuned wheel physics" }
       : PRESET_STAGE_META[resolvedPreset];
 
@@ -118,49 +139,52 @@ export function StageLeft({
 
       <Stage3DCanvas presetId={resolvedPreset} telemetry={telemetry} />
 
-      <nav className="step-switcher" aria-label="Workspace views">
+      <nav className="step-switcher" data-tour="steps" aria-label="Workspace views">
         <div className="step-node-wrap">
-          <button
-            type="button"
-            className="step-node"
-            aria-current={activeSection === "motion" ? "page" : undefined}
-            aria-label="Motion tuning"
-            title="Motion tuning"
-            onClick={() => onSelectSection("motion")}
-          >
-            <Sliders size={15} strokeWidth={1.5} aria-hidden="true" />
-            <span>Motion</span>
-          </button>
+          <Tooltip label="Motion tuning" placement="top-start">
+            <button
+              type="button"
+              className="step-node"
+              aria-current={activeSection === "motion" ? "page" : undefined}
+              aria-label="Motion tuning"
+              onClick={() => onSelectSection("motion")}
+            >
+              <Sliders size={15} strokeWidth={1.5} aria-hidden="true" />
+              <span>Motion</span>
+            </button>
+          </Tooltip>
         </div>
 
         <div className="step-node-wrap">
           <span className="step-dash" aria-hidden="true" />
-          <button
-            type="button"
-            className="step-node"
-            aria-current={activeSection === "apps" ? "page" : undefined}
-            aria-label="App profiles"
-            title="App profiles"
-            onClick={() => onSelectSection("apps")}
-          >
-            <Layers size={15} strokeWidth={1.5} aria-hidden="true" />
-            <span>Apps</span>
-          </button>
+          <Tooltip label="Per-app scroll rules" placement="top">
+            <button
+              type="button"
+              className="step-node"
+              aria-current={activeSection === "apps" ? "page" : undefined}
+              aria-label="App profiles"
+              onClick={() => onSelectSection("apps")}
+            >
+              <Layers size={15} strokeWidth={1.5} aria-hidden="true" />
+              <span>Apps</span>
+            </button>
+          </Tooltip>
         </div>
 
         <div className="step-node-wrap">
           <span className="step-dash" aria-hidden="true" />
-          <button
-            type="button"
-            className="step-node"
-            aria-current={activeSection === "system" ? "page" : undefined}
-            aria-label="System core"
-            title="System core"
-            onClick={() => onSelectSection("system")}
-          >
-            <Shield size={15} strokeWidth={1.5} aria-hidden="true" />
-            <span>System</span>
-          </button>
+          <Tooltip label="System core & startup" placement="top">
+            <button
+              type="button"
+              className="step-node"
+              aria-current={activeSection === "system" ? "page" : undefined}
+              aria-label="System core"
+              onClick={() => onSelectSection("system")}
+            >
+              <Shield size={15} strokeWidth={1.5} aria-hidden="true" />
+              <span>System</span>
+            </button>
+          </Tooltip>
         </div>
       </nav>
     </aside>

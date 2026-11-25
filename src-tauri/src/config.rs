@@ -1,6 +1,12 @@
 use serde::{Deserialize, Serialize};
 use std::fs;
 use std::path::PathBuf;
+use windows::Win32::UI::Shell::{FOLDERID_Documents, KF_FLAG_CREATE, SHGetKnownFolderPath};
+
+#[link(name = "ole32")]
+extern "system" {
+    fn CoTaskMemFree(pv: *const std::ffi::c_void);
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum EasingCurve {
@@ -115,6 +121,14 @@ impl ScrollProfile {
     }
 }
 
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CustomPreset {
+    pub id: String,
+    pub name: String,
+    pub profile: ScrollProfile,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum AppRuleMode {
     Disabled,
@@ -146,6 +160,10 @@ pub struct AppSettings {
     pub theme: String,
     pub start_with_windows: bool,
     pub start_as_admin: bool,
+    #[serde(default)]
+    pub onboarding_completed: bool,
+    #[serde(default)]
+    pub dismissed_tips: Vec<String>,
 }
 
 impl Default for AppSettings {
@@ -164,8 +182,140 @@ impl Default for AppSettings {
             theme: "dark".to_string(),
             start_with_windows: false,
             start_as_admin: false,
+            onboarding_completed: false,
+            dismissed_tips: Vec::new(),
         }
     }
+}
+
+/// Resolves the authoritative Windows Documents folder (automatically handling OneDrive Known Folder Move).
+pub fn resolve_documents_dir() -> PathBuf {
+    unsafe {
+        if let Ok(pwstr) = SHGetKnownFolderPath(&FOLDERID_Documents, KF_FLAG_CREATE, None) {
+            if !pwstr.is_null() {
+                let path_str = pwstr.to_string().unwrap_or_default();
+                CoTaskMemFree(pwstr.0.cast());
+                if !path_str.is_empty() {
+                    return PathBuf::from(path_str);
+                }
+            }
+        }
+    }
+    // Fallbacks if Shell Known Folder API is unavailable
+    if let Ok(onedrive) = std::env::var("OneDrive") {
+        let candidate = PathBuf::from(onedrive).join("Documents");
+        if candidate.exists() {
+            return candidate;
+        }
+    }
+    if let Ok(profile) = std::env::var("USERPROFILE") {
+        let od = PathBuf::from(&profile).join("OneDrive").join("Documents");
+        if od.exists() {
+            return od;
+        }
+        return PathBuf::from(profile).join("Documents");
+    }
+    PathBuf::from(".")
+}
+
+pub fn app_data_dir() -> PathBuf {
+    resolve_documents_dir().join("CharismaScroll")
+}
+
+pub fn presets_dir() -> PathBuf {
+    app_data_dir().join("presets")
+}
+
+pub fn slugify_preset_name(name: &str) -> String {
+    let mut slug = String::new();
+    let mut prev_dash = false;
+    for ch in name.trim().chars() {
+        if ch.is_ascii_alphanumeric() {
+            slug.push(ch.to_ascii_lowercase());
+            prev_dash = false;
+        } else if !prev_dash && !slug.is_empty() {
+            slug.push('-');
+            prev_dash = true;
+        }
+    }
+    let trimmed = slug.trim_matches('-').to_string();
+    if trimmed.is_empty() {
+        "custom-preset".to_string()
+    } else {
+        trimmed
+    }
+}
+
+pub fn load_custom_presets() -> Vec<CustomPreset> {
+    let dir = presets_dir();
+    let Ok(entries) = fs::read_dir(&dir) else {
+        return Vec::new();
+    };
+    let mut list = Vec::new();
+    for entry in entries.flatten() {
+        let path = entry.path();
+        if path.extension().and_then(|e| e.to_str()) != Some("json") {
+            continue;
+        }
+        if let Ok(raw) = fs::read_to_string(&path) {
+            if let Ok(mut parsed) = serde_json::from_str::<CustomPreset>(&raw) {
+                parsed.profile = parsed.profile.sanitized();
+                if !parsed.id.is_empty() && !parsed.name.trim().is_empty() {
+                    list.push(parsed);
+                }
+            }
+        }
+    }
+    list.sort_by(|a, b| a.name.to_lowercase().cmp(&b.name.to_lowercase()));
+    list
+}
+
+pub fn save_custom_preset_file(name: &str, profile: ScrollProfile) -> Result<CustomPreset, String> {
+    let clean_name = name.trim();
+    if clean_name.is_empty() {
+        return Err("Preset name cannot be empty".to_string());
+    }
+    let dir = presets_dir();
+    fs::create_dir_all(&dir).map_err(|e| format!("Cannot create presets directory: {e}"))?;
+
+    let slug = slugify_preset_name(clean_name);
+    let preset = CustomPreset {
+        id: format!("custom:{slug}"),
+        name: clean_name.to_string(),
+        profile: profile.sanitized(),
+    };
+
+    let path = dir.join(format!("{slug}.json"));
+    let tmp = path.with_extension("json.tmp");
+    let content = serde_json::to_string_pretty(&preset)
+        .map_err(|e| format!("Failed to serialize custom preset: {e}"))?;
+    fs::write(&tmp, content).map_err(|e| format!("Failed to write temp preset: {e}"))?;
+    if path.exists() {
+        let _ = fs::remove_file(&path);
+    }
+    fs::rename(&tmp, &path).map_err(|e| format!("Failed to save custom preset: {e}"))?;
+    Ok(preset)
+}
+
+pub fn delete_custom_preset_file(id: &str) -> Result<(), String> {
+    let slug = id.strip_prefix("custom:").unwrap_or(id);
+    if slug.is_empty() || slug.contains('/') || slug.contains('\\') || slug.contains("..") {
+        return Err("Invalid preset identifier".to_string());
+    }
+    let path = presets_dir().join(format!("{slug}.json"));
+    if path.exists() {
+        fs::remove_file(&path).map_err(|e| format!("Failed to delete preset: {e}"))?;
+    }
+    Ok(())
+}
+
+pub fn resolve_preset_profile(id: &str) -> ScrollProfile {
+    if id.starts_with("custom:") {
+        if let Some(found) = load_custom_presets().into_iter().find(|p| p.id == id) {
+            return found.profile;
+        }
+    }
+    ScrollProfile::preset(id)
 }
 
 impl AppSettings {
@@ -189,11 +339,13 @@ impl AppSettings {
     }
 
     pub fn config_path() -> PathBuf {
-        if let Ok(appdata) = std::env::var("APPDATA") {
-            let dir = PathBuf::from(appdata).join("CharismaScroll");
-            return dir.join("settings.json");
-        }
-        PathBuf::from("settings.json")
+        app_data_dir().join("settings.json")
+    }
+
+    fn legacy_appdata_path() -> Option<PathBuf> {
+        std::env::var("APPDATA")
+            .ok()
+            .map(|a| PathBuf::from(a).join("CharismaScroll").join("settings.json"))
     }
 
     pub fn load() -> Self {
@@ -201,6 +353,16 @@ impl AppSettings {
         if let Ok(raw) = fs::read_to_string(&path) {
             if let Ok(parsed) = serde_json::from_str::<AppSettings>(&raw) {
                 return parsed.sanitized();
+            }
+        }
+        // One-time migration from legacy %APPDATA%\CharismaScroll\settings.json into Documents
+        if let Some(legacy) = Self::legacy_appdata_path() {
+            if let Ok(raw) = fs::read_to_string(&legacy) {
+                if let Ok(parsed) = serde_json::from_str::<AppSettings>(&raw) {
+                    let clean = parsed.sanitized();
+                    let _ = clean.save();
+                    return clean;
+                }
             }
         }
         Self::default()

@@ -6,6 +6,7 @@ import {
   type ScrollProfile,
   type ScrollTelemetry,
 } from "../lib/tauri";
+import { Tooltip } from "./Tooltip";
 
 interface TestPadDrawerProps {
   open: boolean;
@@ -163,20 +164,23 @@ export function TestPadDrawer({
 
   return (
     <>
-      <button
-        type="button"
-        className="testpad-trigger"
-        aria-expanded={open}
-        aria-label={open ? "Close scroll test pad" : "Open scroll test pad"}
-        title={open ? "Close test pad" : "Open test pad"}
-        onClick={onToggleOpen}
-      >
-        {open ? (
-          <X size={17} strokeWidth={1.5} aria-hidden="true" />
-        ) : (
-          <LayoutGrid size={17} strokeWidth={1.5} aria-hidden="true" />
-        )}
-      </button>
+      <div className="testpad-trigger-wrap">
+        <Tooltip label={open ? "Close test pad" : "Open live test pad"} placement="top-end">
+          <button
+            type="button"
+            className="testpad-trigger"
+            aria-expanded={open}
+            aria-label={open ? "Close scroll test pad" : "Open scroll test pad"}
+            onClick={onToggleOpen}
+          >
+            {open ? (
+              <X size={17} strokeWidth={1.5} aria-hidden="true" />
+            ) : (
+              <LayoutGrid size={17} strokeWidth={1.5} aria-hidden="true" />
+            )}
+          </button>
+        </Tooltip>
+      </div>
 
       {open && (
         <aside className="testpad-drawer" aria-label="Scroll test pad">
@@ -207,19 +211,21 @@ export function TestPadDrawer({
               >
                 Strip
               </button>
-              <button
-                type="button"
-                className="step-btn"
-                aria-pressed={paused}
-                aria-label={paused ? "Resume curve trace" : "Pause curve trace"}
-                onClick={() => setPaused((p) => !p)}
-              >
-                {paused ? (
-                  <Play size={12} strokeWidth={1.5} aria-hidden="true" />
-                ) : (
-                  <Pause size={12} strokeWidth={1.5} aria-hidden="true" />
-                )}
-              </button>
+              <Tooltip label={paused ? "Resume curve trace" : "Pause curve trace"} placement="top-end">
+                <button
+                  type="button"
+                  className="step-btn"
+                  aria-pressed={paused}
+                  aria-label={paused ? "Resume curve trace" : "Pause curve trace"}
+                  onClick={() => setPaused((p) => !p)}
+                >
+                  {paused ? (
+                    <Play size={12} strokeWidth={1.5} aria-hidden="true" />
+                  ) : (
+                    <Pause size={12} strokeWidth={1.5} aria-hidden="true" />
+                  )}
+                </button>
+              </Tooltip>
             </div>
           </div>
 

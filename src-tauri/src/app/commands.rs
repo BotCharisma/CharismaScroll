@@ -1,14 +1,21 @@
 use crate::app::tray::refresh_tray_state;
-use crate::config::{AppSettings, ScrollProfile};
+use crate::config::{
+    app_data_dir, delete_custom_preset_file, load_custom_presets, resolve_preset_profile,
+    save_custom_preset_file, AppSettings, CustomPreset, ScrollProfile,
+};
 use crate::platform::{
     detect_primary_monitor_hz, is_running_as_admin, list_running_apps, rebind_global_hotkey,
     restart_as_admin, sync_autostart, RunningAppInfo,
 };
 use parking_lot::RwLock;
 use serde::Serialize;
+use std::os::windows::process::CommandExt;
+use std::process::Command;
 use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
 use std::sync::Arc;
 use tauri::{AppHandle, Emitter, State};
+
+const CREATE_NO_WINDOW: u32 = 0x0800_0000;
 
 pub struct SharedAppState {
     pub settings: Arc<RwLock<AppSettings>>,
@@ -24,6 +31,8 @@ pub struct SharedAppState {
 #[serde(rename_all = "camelCase")]
 pub struct AppSnapshot {
     pub settings: AppSettings,
+    pub custom_presets: Vec<CustomPreset>,
+    pub storage_dir: String,
     pub is_admin: bool,
     pub detected_hz: u32,
     pub last_scrolled_exe: Option<String>,
@@ -34,6 +43,8 @@ impl SharedAppState {
     pub fn snapshot(&self) -> AppSnapshot {
         AppSnapshot {
             settings: self.settings.read().clone(),
+            custom_presets: load_custom_presets(),
+            storage_dir: app_data_dir().to_string_lossy().to_string(),
             is_admin: is_running_as_admin(),
             detected_hz: detect_primary_monitor_hz(),
             last_scrolled_exe: self.last_scrolled_exe.read().clone(),
@@ -91,8 +102,49 @@ pub fn apply_preset(
 ) -> Result<AppSnapshot, String> {
     let mut next = state.settings.read().clone();
     next.active_preset = preset_id.clone();
-    next.global_profile = ScrollProfile::preset(&preset_id);
+    next.global_profile = resolve_preset_profile(&preset_id);
     state.apply_settings_to_runtime(next, &app)
+}
+
+#[tauri::command]
+pub fn save_custom_preset(
+    app: AppHandle,
+    state: State<'_, SharedAppState>,
+    name: String,
+    profile: ScrollProfile,
+) -> Result<AppSnapshot, String> {
+    let saved = save_custom_preset_file(&name, profile)?;
+    let mut next = state.settings.read().clone();
+    next.active_preset = saved.id;
+    next.global_profile = saved.profile;
+    state.apply_settings_to_runtime(next, &app)
+}
+
+#[tauri::command]
+pub fn delete_custom_preset(
+    app: AppHandle,
+    state: State<'_, SharedAppState>,
+    preset_id: String,
+) -> Result<AppSnapshot, String> {
+    delete_custom_preset_file(&preset_id)?;
+    let mut next = state.settings.read().clone();
+    if next.active_preset == preset_id {
+        next.active_preset = "classic".to_string();
+        next.global_profile = ScrollProfile::preset("classic");
+    }
+    state.apply_settings_to_runtime(next, &app)
+}
+
+#[tauri::command]
+pub fn open_storage_folder() -> Result<(), String> {
+    let dir = app_data_dir();
+    let _ = std::fs::create_dir_all(&dir);
+    Command::new("explorer")
+        .arg(&dir)
+        .creation_flags(CREATE_NO_WINDOW)
+        .spawn()
+        .map_err(|e| format!("Failed to open Documents folder: {e}"))?;
+    Ok(())
 }
 
 #[tauri::command]

@@ -18,6 +18,12 @@ export interface ScrollProfile {
   stopOnReverse: boolean;
 }
 
+export interface CustomPreset {
+  id: string;
+  name: string;
+  profile: ScrollProfile;
+}
+
 export interface AppRule {
   exeName: string;
   displayName: string;
@@ -39,10 +45,14 @@ export interface AppSettings {
   theme: string;
   startWithWindows: boolean;
   startAsAdmin: boolean;
+  onboardingCompleted: boolean;
+  dismissedTips: string[];
 }
 
 export interface AppSnapshot {
   settings: AppSettings;
+  customPresets: CustomPreset[];
+  storageDir: string;
   isAdmin: boolean;
   detectedHz: number;
   lastScrolledExe: string | null;
@@ -172,7 +182,8 @@ export function isTauriRuntime(): boolean {
   return typeof window !== "undefined" && "__TAURI_INTERNALS__" in window;
 }
 
-const STORAGE_KEY = "charisma_scroll_obsidian_v2";
+const STORAGE_KEY = "charisma_scroll_obsidian_v3";
+const PRESETS_KEY = "charisma_scroll_custom_presets_v3";
 
 function loadMockSettings(): AppSettings {
   try {
@@ -210,17 +221,43 @@ function loadMockSettings(): AppSettings {
     theme: "dark",
     startWithWindows: false,
     startAsAdmin: false,
+    onboardingCompleted: false,
+    dismissedTips: [],
   };
 }
 
-function saveMockSettings(settings: AppSettings): AppSnapshot {
+function loadMockPresets(): CustomPreset[] {
+  try {
+    const raw = localStorage.getItem(PRESETS_KEY);
+    if (raw) return JSON.parse(raw) as CustomPreset[];
+  } catch {
+    // Ignore storage read failure
+  }
+  return [
+    {
+      id: "custom-night-reader",
+      name: "Night Reader",
+      profile: {
+        ...PRESET_PROFILES.macbook,
+        stepSizePx: 85,
+        animationTimeMs: 560,
+      },
+    },
+  ];
+}
+
+function saveMockState(settings: AppSettings, presets?: CustomPreset[]): AppSnapshot {
+  const activePresets = presets ?? loadMockPresets();
   try {
     localStorage.setItem(STORAGE_KEY, JSON.stringify(settings));
+    localStorage.setItem(PRESETS_KEY, JSON.stringify(activePresets));
   } catch {
     // Ignore storage write failure
   }
   return {
     settings,
+    customPresets: activePresets,
+    storageDir: "C:\\Users\\Demo\\OneDrive\\Documents\\CharismaScroll",
     isAdmin: false,
     detectedHz: 185,
     lastScrolledExe: "chrome.exe",
@@ -230,35 +267,82 @@ function saveMockSettings(settings: AppSettings): AppSnapshot {
 
 export async function getAppSnapshot(): Promise<AppSnapshot> {
   if (!isTauriRuntime()) {
-    return saveMockSettings(loadMockSettings());
+    return saveMockState(loadMockSettings(), loadMockPresets());
   }
   return invoke<AppSnapshot>("get_app_snapshot");
 }
 
 export async function updateSettings(settings: AppSettings): Promise<AppSnapshot> {
   if (!isTauriRuntime()) {
-    return saveMockSettings(settings);
+    return saveMockState(settings);
   }
   return invoke<AppSnapshot>("update_settings", { settings });
 }
 
-export async function applyPreset(presetId: PresetId): Promise<AppSnapshot> {
+export async function applyPreset(presetId: string): Promise<AppSnapshot> {
   if (!isTauriRuntime()) {
     const current = loadMockSettings();
-    const next: AppSettings = {
+    const presets = loadMockPresets();
+    const foundCustom = presets.find((p) => p.id === presetId);
+    const nextProfile = foundCustom
+      ? { ...foundCustom.profile }
+      : { ...(PRESET_PROFILES[presetId as PresetId] ?? PRESET_PROFILES.classic) };
+    return saveMockState({
       ...current,
       activePreset: presetId,
-      globalProfile: { ...(PRESET_PROFILES[presetId] ?? PRESET_PROFILES.classic) },
-    };
-    return saveMockSettings(next);
+      globalProfile: nextProfile,
+    });
   }
   return invoke<AppSnapshot>("apply_preset", { presetId });
+}
+
+export async function saveCustomPreset(
+  name: string,
+  profile: ScrollProfile
+): Promise<AppSnapshot> {
+  if (!isTauriRuntime()) {
+    const clean = name.trim();
+    const slug =
+      clean
+        .toLowerCase()
+        .replace(/[^a-z0-9]+/g, "-")
+        .replace(/^-|-$/g, "") || "custom";
+    const id = `custom-${slug}`;
+    const existing = loadMockPresets().filter((p) => p.id !== id);
+    const nextPresets = [...existing, { id, name: clean, profile: { ...profile } }].sort((a, b) =>
+      a.name.localeCompare(b.name)
+    );
+    const current = loadMockSettings();
+    return saveMockState(
+      { ...current, activePreset: id, globalProfile: { ...profile } },
+      nextPresets
+    );
+  }
+  return invoke<AppSnapshot>("save_custom_preset", { name, profile });
+}
+
+export async function deleteCustomPreset(presetId: string): Promise<AppSnapshot> {
+  if (!isTauriRuntime()) {
+    const nextPresets = loadMockPresets().filter((p) => p.id !== presetId);
+    const current = loadMockSettings();
+    const nextSettings =
+      current.activePreset === presetId
+        ? { ...current, activePreset: "custom" }
+        : current;
+    return saveMockState(nextSettings, nextPresets);
+  }
+  return invoke<AppSnapshot>("delete_custom_preset", { presetId });
+}
+
+export async function openStorageFolder(): Promise<void> {
+  if (!isTauriRuntime()) return;
+  return invoke<void>("open_storage_folder");
 }
 
 export async function toggleEngine(): Promise<AppSnapshot> {
   if (!isTauriRuntime()) {
     const current = loadMockSettings();
-    return saveMockSettings({ ...current, enabled: !current.enabled });
+    return saveMockState({ ...current, enabled: !current.enabled });
   }
   return invoke<AppSnapshot>("toggle_engine");
 }

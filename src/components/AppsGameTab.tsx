@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { Gamepad2, Plus, RefreshCw, RotateCcw, Trash2 } from "lucide-react";
 import {
   getRunningApps,
@@ -7,6 +7,8 @@ import {
   type RunningAppInfo,
   type ScrollProfile,
 } from "../lib/tauri";
+import { StageDropdown, type DropdownOption } from "./StageDropdown";
+import { Tooltip } from "./Tooltip";
 
 interface AppsGameTabProps {
   gameModeFullscreen: boolean;
@@ -36,6 +38,18 @@ export function AppsGameTab({
   useEffect(() => {
     void loadRunning();
   }, []);
+
+  const appOptions = useMemo<DropdownOption[]>(
+    () => [
+      { value: "", label: "Running window…" },
+      ...runningApps.map((app) => ({
+        value: app.exeName,
+        label: app.displayName,
+        sublabel: app.exeName,
+      })),
+    ],
+    [runningApps]
+  );
 
   const addRule = (exeRaw: string, displayRaw?: string) => {
     let exe = exeRaw.trim();
@@ -132,24 +146,19 @@ export function AppsGameTab({
       </div>
 
       <div className="compact-add-bar">
-        <select
+        <StageDropdown
           id="open-app-select"
-          name="openApp"
-          aria-label="Select running application"
-          className="stage-select"
+          ariaLabel="Select running application"
           value={selectedExe}
-          onChange={(e) => {
-            setSelectedExe(e.target.value);
-            if (e.target.value) setManualExe("");
+          placeholder="Running window…"
+          options={appOptions}
+          direction="down"
+          minWidthClass="cs-dropdown-app"
+          onChange={(val) => {
+            setSelectedExe(val);
+            if (val) setManualExe("");
           }}
-        >
-          <option value="">Running window…</option>
-          {runningApps.map((app) => (
-            <option key={app.exeName} value={app.exeName}>
-              {app.displayName} ({app.exeName})
-            </option>
-          ))}
-        </select>
+        />
 
         <input
           id="exe-input"
@@ -170,15 +179,16 @@ export function AppsGameTab({
           }}
         />
 
-        <button
-          type="button"
-          className="step-btn"
-          aria-label="Refresh running windows"
-          title="Refresh running windows"
-          onClick={() => void loadRunning()}
-        >
-          <RefreshCw size={13} strokeWidth={1.5} aria-hidden="true" />
-        </button>
+        <Tooltip label="Refresh running windows" placement="top">
+          <button
+            type="button"
+            className="step-btn"
+            aria-label="Refresh running windows"
+            onClick={() => void loadRunning()}
+          >
+            <RefreshCw size={13} strokeWidth={1.5} aria-hidden="true" />
+          </button>
+        </Tooltip>
 
         <button
           type="button"
@@ -235,15 +245,16 @@ export function AppsGameTab({
                     {rule.mode === "Disabled" ? "Bypassed" : "Custom"}
                   </button>
 
-                  <button
-                    type="button"
-                    className="step-btn"
-                    aria-label={`Remove ${rule.exeName}`}
-                    title="Remove rule"
-                    onClick={() => removeRule(rule.exeName)}
-                  >
-                    <Trash2 size={13} strokeWidth={1.5} aria-hidden="true" />
-                  </button>
+                  <Tooltip label="Remove rule" placement="top-end">
+                    <button
+                      type="button"
+                      className="step-btn"
+                      aria-label={`Remove ${rule.exeName}`}
+                      onClick={() => removeRule(rule.exeName)}
+                    >
+                      <Trash2 size={13} strokeWidth={1.5} aria-hidden="true" />
+                    </button>
+                  </Tooltip>
                 </div>
               </div>
 

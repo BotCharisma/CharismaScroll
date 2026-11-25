@@ -1,5 +1,7 @@
 use crate::app::commands::SharedAppState;
-use crate::config::{AppRule, AppRuleMode, ScrollProfile};
+use crate::config::{
+    load_custom_presets, resolve_preset_profile, AppRule, AppRuleMode, ScrollProfile,
+};
 use std::sync::atomic::Ordering;
 use tauri::image::Image;
 use tauri::menu::{CheckMenuItem, Menu, MenuItem, PredefinedMenuItem};
@@ -149,6 +151,22 @@ pub fn build_tray_menu(app: &AppHandle, state: &SharedAppState) -> tauri::Result
     menu.append(&preset_coding)?;
     menu.append(&preset_cinema)?;
 
+    let custom_presets = load_custom_presets();
+    if !custom_presets.is_empty() {
+        menu.append(&PredefinedMenuItem::separator(app)?)?;
+        for cp in custom_presets {
+            let item = CheckMenuItem::with_id(
+                app,
+                format!("preset:{}", cp.id),
+                cp.name,
+                true,
+                settings.active_preset == cp.id,
+                None::<&str>,
+            )?;
+            menu.append(&item)?;
+        }
+    }
+
     if let Some(exe) = recent_exe {
         let already_disabled = settings
             .app_rules
@@ -283,7 +301,7 @@ pub fn setup_tray(app: &AppHandle, state: &SharedAppState) -> tauri::Result<Tray
                     let preset_id = p.trim_start_matches("preset:");
                     let mut next = state.settings.read().clone();
                     next.active_preset = preset_id.to_string();
-                    next.global_profile = ScrollProfile::preset(preset_id);
+                    next.global_profile = resolve_preset_profile(preset_id);
                     let _ = state.apply_settings_to_runtime(next, app);
                 }
                 _ => {}

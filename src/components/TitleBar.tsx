@@ -1,14 +1,16 @@
 import { type MouseEvent } from "react";
 import { getCurrentWindow } from "@tauri-apps/api/window";
-import { Minus, X } from "lucide-react";
+import { HelpCircle, Minus, X } from "lucide-react";
 import { isTauriRuntime } from "../lib/tauri";
+import { Tooltip } from "./Tooltip";
 
 interface TitleBarProps {
   detectedHz: number;
   targetFps: number;
+  onOpenTour: () => void;
 }
 
-export function TitleBar({ detectedHz, targetFps }: TitleBarProps) {
+export function TitleBar({ detectedHz, targetFps, onOpenTour }: TitleBarProps) {
   const displayHz = targetFps >= 60 ? targetFps : detectedHz;
 
   const handleDragMouseDown = (e: MouseEvent<HTMLElement>) => {
@@ -34,28 +36,46 @@ export function TitleBar({ detectedHz, targetFps }: TitleBarProps) {
   return (
     <div className="drag-ceiling" onMouseDown={handleDragMouseDown}>
       <div className="corner-chrome">
-        <span className="hz-badge" title="Active refresh sync">
-          {displayHz}
-          {"\u00A0"}Hz
-        </span>
-        <button
-          type="button"
-          className="caption-btn"
-          onClick={handleMinimize}
-          aria-label="Minimize window"
-          title="Minimize"
-        >
-          <Minus size={14} strokeWidth={1.5} aria-hidden="true" />
-        </button>
-        <button
-          type="button"
-          className="caption-btn caption-btn-close"
-          onClick={handleClose}
-          aria-label="Close to System Tray"
-          title="Close to System Tray"
-        >
-          <X size={14} strokeWidth={1.5} aria-hidden="true" />
-        </button>
+        <Tooltip label="Active refresh sync" placement="bottom">
+          <span className="hz-badge">
+            {displayHz}
+            {"\u00A0"}Hz
+          </span>
+        </Tooltip>
+
+        <Tooltip label="Quick guide" placement="bottom">
+          <button
+            type="button"
+            className="caption-btn"
+            onClick={onOpenTour}
+            aria-label="Open quick guide"
+          >
+            <HelpCircle size={14} strokeWidth={1.5} aria-hidden="true" />
+          </button>
+        </Tooltip>
+
+        <Tooltip label="Minimize" placement="bottom">
+          <button
+            type="button"
+            className="caption-btn"
+            onClick={handleMinimize}
+            aria-label="Minimize window"
+          >
+            <Minus size={14} strokeWidth={1.5} aria-hidden="true" />
+          </button>
+        </Tooltip>
+
+        <Tooltip label="Close to System Tray" placement="bottom-end">
+          <button
+            type="button"
+            className="caption-btn caption-btn-close"
+            data-tour="close"
+            onClick={handleClose}
+            aria-label="Close to System Tray"
+          >
+            <X size={14} strokeWidth={1.5} aria-hidden="true" />
+          </button>
+        </Tooltip>
       </div>
     </div>
   );
