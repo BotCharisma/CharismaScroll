@@ -9,6 +9,11 @@ use tauri::window::Color;
 use tauri::{
     AppHandle, Emitter, LogicalSize, Manager, PhysicalPosition, WebviewUrl, WebviewWindowBuilder,
 };
+use windows::Win32::Foundation::{HWND, LPARAM, WPARAM};
+use windows::Win32::UI::WindowsAndMessaging::{
+    CreateIconFromResourceEx, DestroyIcon, SendMessageW, HICON, ICON_BIG, ICON_SMALL,
+    LR_DEFAULTCOLOR, WM_SETICON,
+};
 
 const TRAY_ID: &str = "charisma-tray";
 pub const TRAY_MENU_LABEL: &str = "tray-menu";
@@ -23,6 +28,7 @@ const TASKBAR_DARK_PNG: &[u8] = include_bytes!("../../icons/taskbar-dark-64.png"
 static LAST_TRAY_ANCHOR: Mutex<(f64, f64)> = Mutex::new((0.0, 0.0));
 static LAST_TRAY_HIDE: Mutex<Option<Instant>> = Mutex::new(None);
 static TRAY_MENU_HIDE_GEN: AtomicU64 = AtomicU64::new(0);
+static ACTIVE_TASKBAR_HICON: Mutex<Option<isize>> = Mutex::new(None);
 
 #[link(name = "dwmapi")]
 extern "system" {
@@ -55,6 +61,38 @@ pub fn apply_adaptive_taskbar_icon(win: &tauri::WebviewWindow) {
     } else {
         TASKBAR_LIGHT_PNG
     };
+
+    if let Ok(win_hwnd) = win.hwnd() {
+        let hwnd = HWND(win_hwnd.0 as *mut std::ffi::c_void);
+        if let Ok(hicon) = unsafe {
+            CreateIconFromResourceEx(bytes, true, 0x0003_0000, 0, 0, LR_DEFAULTCOLOR)
+        } {
+            unsafe {
+                let _ = SendMessageW(
+                    hwnd,
+                    WM_SETICON,
+                    WPARAM(ICON_BIG as usize),
+                    LPARAM(hicon.0 as isize),
+                );
+                let _ = SendMessageW(
+                    hwnd,
+                    WM_SETICON,
+                    WPARAM(ICON_SMALL as usize),
+                    LPARAM(hicon.0 as isize),
+                );
+            }
+            let prev = ACTIVE_TASKBAR_HICON.lock().replace(hicon.0 as isize);
+            if let Some(old_ptr) = prev {
+                if old_ptr != hicon.0 as isize {
+                    unsafe {
+                        let _ = DestroyIcon(HICON(old_ptr as *mut std::ffi::c_void));
+                    }
+                }
+            }
+            return;
+        }
+    }
+
     if let Ok(img) = Image::from_bytes(bytes) {
         let _ = win.set_icon(img);
     }
@@ -219,9 +257,9 @@ pub fn create_or_focus_main_window(app: &AppHandle) {
     hide_tray_menu(app);
     if let Some(win) = app.get_webview_window("main") {
         apply_win11_rounding(&win);
-        apply_adaptive_taskbar_icon(&win);
         let _ = win.unminimize();
         let _ = win.show();
+        apply_adaptive_taskbar_icon(&win);
         let _ = win.set_focus();
         return;
     }

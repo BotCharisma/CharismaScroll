@@ -1,6 +1,6 @@
 [package]
 name = "charisma-scroll"
-version = "0.3.0"
+version = "0.3.1"
 description = "System-wide smooth mouse wheel studio for Windows"
 authors = ["CharismaScroll"]
 edition = "2021"

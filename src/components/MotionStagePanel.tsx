@@ -1,4 +1,5 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import {
   Activity,
   Check,
@@ -80,9 +81,54 @@ export function MotionStagePanel({
   const [presetMenuOpen, setPresetMenuOpen] = useState(false);
   const [presetName, setPresetName] = useState("");
   const [saving, setSaving] = useState(false);
+  const [calloutPos, setCalloutPos] = useState<{
+    left: number;
+    top: number;
+    arrowTop: number;
+  } | null>(null);
 
   const presetMenuRef = useRef<HTMLDivElement | null>(null);
   const presetInputRef = useRef<HTMLInputElement | null>(null);
+  const calloutRef = useRef<HTMLElement | null>(null);
+  const rowRefs = useRef<Record<Exclude<OpenRow, null>, HTMLDivElement | null>>({
+    step: null,
+    time: null,
+    boost: null,
+    curve: null,
+  });
+
+  useLayoutEffect(() => {
+    if (!openRow) {
+      setCalloutPos(null);
+      return;
+    }
+
+    const updatePos = () => {
+      const rowEl = rowRefs.current[openRow];
+      if (!rowEl) return;
+      const rect = rowEl.getBoundingClientRect();
+      const width = 232;
+      const gap = 16;
+      const margin = 14;
+      const dockReserve = 86;
+      const calloutH = calloutRef.current?.offsetHeight || 168;
+
+      const left = Math.max(margin, rect.left - width - gap);
+      const maxTop = Math.max(margin, window.innerHeight - calloutH - dockReserve);
+      const top = Math.min(Math.max(margin, rect.top + 4), maxTop);
+      const arrowTop = Math.min(Math.max(16, rect.top + 24 - top), Math.max(16, calloutH - 22));
+
+      setCalloutPos({ left, top, arrowTop });
+    };
+
+    updatePos();
+    const rafId = window.requestAnimationFrame(updatePos);
+    window.addEventListener("resize", updatePos);
+    return () => {
+      window.cancelAnimationFrame(rafId);
+      window.removeEventListener("resize", updatePos);
+    };
+  }, [openRow]);
 
   useEffect(() => {
     if (!presetMenuOpen) return;
@@ -144,11 +190,21 @@ export function MotionStagePanel({
   };
 
   const renderCallout = (row: Exclude<OpenRow, null>) => {
-    if (openRow !== row) return null;
+    if (openRow !== row || !calloutPos) return null;
     const guide = PARAM_GUIDES[row];
-    return (
-      <aside className="param-callout" role="note" aria-label={`${guide.title} usage guide`}>
-        <span className="param-callout-arrow" aria-hidden="true" />
+    return createPortal(
+      <aside
+        ref={calloutRef}
+        className="param-callout"
+        role="note"
+        aria-label={`${guide.title} usage guide`}
+        style={{ left: calloutPos.left, top: calloutPos.top }}
+      >
+        <span
+          className="param-callout-arrow"
+          style={{ top: calloutPos.arrowTop }}
+          aria-hidden="true"
+        />
         <div className="param-callout-head">
           <span className="param-callout-title">{guide.title}</span>
           <button
@@ -162,7 +218,8 @@ export function MotionStagePanel({
         </div>
         <p className="param-callout-body">{guide.body}</p>
         <span className="param-callout-tip">{guide.tip}</span>
-      </aside>
+      </aside>,
+      document.body
     );
   };
 
@@ -325,7 +382,12 @@ export function MotionStagePanel({
 
       <div className="spec-rows" data-tour="rows">
         {/* Row 1: Step size */}
-        <div className={openRow === "step" ? "spec-row is-open" : "spec-row"}>
+        <div
+          ref={(el) => {
+            rowRefs.current.step = el;
+          }}
+          className={openRow === "step" ? "spec-row is-open" : "spec-row"}
+        >
           {renderCallout("step")}
           <div className="spec-row-main">
             <button
@@ -389,7 +451,12 @@ export function MotionStagePanel({
         </div>
 
         {/* Row 2: Glide time */}
-        <div className={openRow === "time" ? "spec-row is-open" : "spec-row"}>
+        <div
+          ref={(el) => {
+            rowRefs.current.time = el;
+          }}
+          className={openRow === "time" ? "spec-row is-open" : "spec-row"}
+        >
           {renderCallout("time")}
           <div className="spec-row-main">
             <button
@@ -457,7 +524,12 @@ export function MotionStagePanel({
         </div>
 
         {/* Row 3: Max boost */}
-        <div className={openRow === "boost" ? "spec-row is-open" : "spec-row"}>
+        <div
+          ref={(el) => {
+            rowRefs.current.boost = el;
+          }}
+          className={openRow === "boost" ? "spec-row is-open" : "spec-row"}
+        >
           {renderCallout("boost")}
           <div className="spec-row-main">
             <button
@@ -528,7 +600,12 @@ export function MotionStagePanel({
         </div>
 
         {/* Row 4: Easing curve */}
-        <div className={openRow === "curve" ? "spec-row is-open" : "spec-row"}>
+        <div
+          ref={(el) => {
+            rowRefs.current.curve = el;
+          }}
+          className={openRow === "curve" ? "spec-row is-open" : "spec-row"}
+        >
           {renderCallout("curve")}
           <div className="spec-row-main">
             <button

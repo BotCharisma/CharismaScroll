@@ -126,9 +126,6 @@ export function StageLeft({
         <span className="stage-brand-name" translate="no">
           CharismaScroll
         </span>
-        <span className="stage-version-badge" translate="no">
-          Beta v0.3.0
-        </span>
       </div>
 
       <div className="stage-hero-copy">

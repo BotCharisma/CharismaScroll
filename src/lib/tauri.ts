@@ -261,7 +261,7 @@ function saveMockState(settings: AppSettings, presets?: CustomPreset[]): AppSnap
     isAdmin: false,
     detectedHz: 185,
     lastScrolledExe: "chrome.exe",
-    version: "0.3.0",
+    version: "0.3.1",
   };
 }
 
@@ -433,7 +433,7 @@ export async function checkForUpdate(): Promise<UpdateInfo> {
   if (!isTauriRuntime()) {
     return {
       available: false,
-      currentVersion: "0.3.0",
+      currentVersion: "0.3.1",
       version: null,
       body: null,
       date: null,

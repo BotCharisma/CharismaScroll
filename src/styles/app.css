@@ -215,18 +215,6 @@ select:focus-visible {
   letter-spacing: -0.01em;
 }
 
-.stage-version-badge {
-  font-size: 0.6875rem;
-  font-weight: 500;
-  line-height: 1;
-  padding: 3px 7px;
-  border-radius: var(--radius-pill);
-  border: 1px solid rgba(255, 253, 250, 0.24);
-  background-color: rgba(22, 19, 22, 0.28);
-  color: rgba(255, 253, 250, 0.88);
-  letter-spacing: 0.01em;
-}
-
 .stage-hero-copy {
   position: relative;
   z-index: 10;
@@ -1295,11 +1283,9 @@ select:focus-visible {
    Left-Anchored Parameter Usage Callout (arrow points right to active row)
    ============================================================================ */
 .param-callout {
-  position: absolute;
-  right: calc(100% + var(--space-md));
-  top: var(--space-2xs);
+  position: fixed;
   width: 232px;
-  z-index: 160;
+  z-index: 310;
   display: flex;
   flex-direction: column;
   gap: var(--space-2xs);
@@ -1307,6 +1293,7 @@ select:focus-visible {
   border-radius: var(--radius-md);
   border: 1px solid var(--color-signal);
   background-color: var(--color-callout-bg);
+  box-shadow: var(--shadow-dock);
   color: var(--color-ink);
   animation: csCalloutIn var(--dur-micro) var(--ease-out);
 }
