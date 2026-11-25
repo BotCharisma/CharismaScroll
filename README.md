@@ -30,7 +30,9 @@ CharismaScroll intercepts raw mouse wheel detents at the Win32 `WH_MOUSE_LL` lev
 
 > [!NOTE]
 > **Windows SmartScreen Notice (Unsigned Beta Builds)**
-> Because early beta releases are not yet signed with a commercial Authenticode certificate, Windows Defender SmartScreen may show *"Windows protected your PC"*. Click **More info** → **Run anyway** to proceed.
+> Because early beta releases are not yet signed with a commercial Authenticode certificate:
+> - **Microsoft Edge** may show *"isn't commonly downloaded"*: hover over the download → click **`...`** → **Keep** → **Show more** → **Keep anyway**.
+> - **Windows Defender SmartScreen** may show *"Windows protected your PC"*: click **More info** → **Run anyway** to proceed.
 
 ---
 

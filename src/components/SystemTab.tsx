@@ -322,7 +322,7 @@ export function SystemTab({
 
             <div className="spec-controls">
               {updateState === "idle" && (
-                <span className="update-status-text mono-num">Beta v0.3.1</span>
+                <span className="update-status-text mono-num">Beta v0.3.2</span>
               )}
               {updateState === "checking" && (
                 <span className="update-status-text">Checking…</span>

@@ -1,7 +1,7 @@
 {
   "name": "charisma-scroll",
   "private": true,
-  "version": "0.3.1-beta",
+  "version": "0.3.2-beta",
   "type": "module",
   "scripts": {
     "dev": "vite --port 5173 --strictPort",

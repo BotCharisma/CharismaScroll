@@ -9,10 +9,15 @@ use tauri::window::Color;
 use tauri::{
     AppHandle, Emitter, LogicalSize, Manager, PhysicalPosition, WebviewUrl, WebviewWindowBuilder,
 };
+use windows::core::PROPVARIANT;
 use windows::Win32::Foundation::{HWND, LPARAM, WPARAM};
+use windows::Win32::Storage::EnhancedStorage::{
+    PKEY_AppUserModel_ID, PKEY_AppUserModel_RelaunchCommand, PKEY_AppUserModel_RelaunchDisplayNameResource,
+};
+use windows::Win32::UI::Shell::PropertiesSystem::{IPropertyStore, SHGetPropertyStoreForWindow};
 use windows::Win32::UI::WindowsAndMessaging::{
-    CreateIconFromResourceEx, DestroyIcon, SendMessageW, HICON, ICON_BIG, ICON_SMALL,
-    LR_DEFAULTCOLOR, WM_SETICON,
+    CreateIconFromResourceEx, DestroyIcon, SendMessageW, SetClassLongPtrW, GCLP_HICON,
+    GCLP_HICONSM, HICON, ICON_BIG, ICON_SMALL, LR_DEFAULTCOLOR, WM_SETICON,
 };
 
 const TRAY_ID: &str = "charisma-tray";
@@ -54,6 +59,24 @@ fn apply_win11_rounding(win: &tauri::WebviewWindow) {
     }
 }
 
+/// Decouples window AUMID from the Start Menu `.lnk` shortcut so Windows 11 Taskbar honors live `WM_SETICON` updates.
+fn apply_window_aumid(hwnd: HWND) {
+    unsafe {
+        if let Ok(store) = SHGetPropertyStoreForWindow::<_, IPropertyStore>(hwnd) {
+            let aumid = PROPVARIANT::from("CharismaScroll.Studio.Window");
+            let name = PROPVARIANT::from("CharismaScroll");
+            let _ = store.SetValue(&PKEY_AppUserModel_ID, &aumid);
+            let _ = store.SetValue(&PKEY_AppUserModel_RelaunchDisplayNameResource, &name);
+            if let Ok(exe) = std::env::current_exe() {
+                let exe_str = exe.to_string_lossy();
+                let cmd = PROPVARIANT::from(exe_str.as_ref());
+                let _ = store.SetValue(&PKEY_AppUserModel_RelaunchCommand, &cmd);
+            }
+            let _ = store.Commit();
+        }
+    }
+}
+
 /// Adaptive taskbar icon: Light Ivory on Dark Windows taskbar, Dark Espresso on Light Windows taskbar.
 pub fn apply_adaptive_taskbar_icon(win: &tauri::WebviewWindow) {
     let bytes = if is_windows_system_light_theme() {
@@ -64,10 +87,13 @@ pub fn apply_adaptive_taskbar_icon(win: &tauri::WebviewWindow) {
 
     if let Ok(win_hwnd) = win.hwnd() {
         let hwnd = HWND(win_hwnd.0 as *mut std::ffi::c_void);
+        apply_window_aumid(hwnd);
         if let Ok(hicon) = unsafe {
             CreateIconFromResourceEx(bytes, true, 0x0003_0000, 0, 0, LR_DEFAULTCOLOR)
         } {
             unsafe {
+                SetClassLongPtrW(hwnd, GCLP_HICON, hicon.0 as isize);
+                SetClassLongPtrW(hwnd, GCLP_HICONSM, hicon.0 as isize);
                 let _ = SendMessageW(
                     hwnd,
                     WM_SETICON,
@@ -257,9 +283,9 @@ pub fn create_or_focus_main_window(app: &AppHandle) {
     hide_tray_menu(app);
     if let Some(win) = app.get_webview_window("main") {
         apply_win11_rounding(&win);
+        apply_adaptive_taskbar_icon(&win);
         let _ = win.unminimize();
         let _ = win.show();
-        apply_adaptive_taskbar_icon(&win);
         let _ = win.set_focus();
         return;
     }
@@ -271,10 +297,12 @@ pub fn create_or_focus_main_window(app: &AppHandle) {
         .center()
         .resizable(true)
         .decorations(false)
+        .visible(false)
         .build()
     {
         apply_win11_rounding(&win);
         apply_adaptive_taskbar_icon(&win);
+        let _ = win.show();
         let _ = win.set_focus();
     }
 }
