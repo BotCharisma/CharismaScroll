@@ -9,6 +9,7 @@
     "dev:app": "tauri dev",
     "dev:app:no-watch": "tauri dev --no-watch",
     "build": "tsc --noEmit && vite build",
+    "tauri": "tauri",
     "tauri:build": "tauri build"
   },
   "dependencies": {
